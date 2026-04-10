@@ -1,0 +1,15 @@
+[Unit]
+Description=Hysteria Subscription Backend
+After=network.target hysteria-server.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env python3 /root/hysteria/subscription_service.py
+WorkingDirectory=/root/hysteria
+User=root
+Group=root
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

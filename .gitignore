@@ -1,0 +1,10 @@
+.env
+*.key
+*.crt
+*.pem
+users.json
+subscription_meta.json
+state/
+__pycache__/
+*.pyc
+*.bak

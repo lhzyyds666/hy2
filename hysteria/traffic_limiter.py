@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+import json
+import os
+import fcntl
+import urllib.request
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+
+USERS_FILE = "/root/hysteria/users.json"
+USAGE_FILE = "/root/hysteria/state/usage.json"
+ONLINE_SNAPSHOT_FILE = "/root/hysteria/state/online.json"
+RESET_STATE_FILE = "/root/hysteria/state/auto_reset_state.json"
+RESET_LOG_FILE = "/root/hysteria/state/usage_reset.log"
+USAGE_LOCK_FILE = "/root/hysteria/state/usage.lock"
+API_BASE = "http://127.0.0.1:25413"
+API_SECRET = "__HY_API_SECRET__"
+
+
+def load_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def save_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=True, indent=2)
+
+
+@contextmanager
+def usage_lock():
+    os.makedirs(os.path.dirname(USAGE_LOCK_FILE), exist_ok=True)
+    with open(USAGE_LOCK_FILE, "a+", encoding="utf-8") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def append_reset_log(actor, action, target, before, after, mk):
+    line = {
+        "time": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "actor": actor,
+        "ip": "",
+        "action": action,
+        "target": target,
+        "month": mk,
+        "before": before,
+        "after": after,
+    }
+    os.makedirs(os.path.dirname(RESET_LOG_FILE), exist_ok=True)
+    with open(RESET_LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(line, ensure_ascii=True) + "\n")
+
+
+def get(path):
+    req = urllib.request.Request(
+        f"{API_BASE}{path}",
+        headers={"Authorization": API_SECRET},
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=3) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def post(path, obj):
+    body = json.dumps(obj).encode("utf-8")
+    req = urllib.request.Request(
+        f"{API_BASE}{path}",
+        data=body,
+        headers={"Authorization": API_SECRET, "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=3):
+        return
+
+
+def billing_month_key(now):
+    """Billing cycle resets on the 21st. Before the 21st belongs to the previous cycle.
+    Must match subscription_service.month_key() / auth_backend month logic."""
+    if now.day >= 21:
+        return now.strftime("%Y-%m")
+    prev = now.replace(day=1) - timedelta(days=1)
+    return prev.strftime("%Y-%m")
+
+
+def normalize_usage_entry(entry):
+    if isinstance(entry, dict):
+        tx = int(entry.get("tx", 0))
+        rx = int(entry.get("rx", 0))
+        total = int(entry.get("total", tx + rx))
+        return {"tx": tx, "rx": rx, "total": total}
+    total = int(entry or 0)
+    return {"tx": 0, "rx": total, "total": total}
+
+
+def maybe_reset_all_usage_on_day_21(now, users, usage, month):
+    if now.day != 21:
+        return
+    state = load_json(RESET_STATE_FILE, {})
+    if state.get("last_reset_month") == month:
+        return
+
+    usage.setdefault(month, {})
+    before_all = {}
+    for uid in users.keys():
+        before_all[uid] = normalize_usage_entry(usage[month].get(uid, 0))
+        usage[month][uid] = {"tx": 0, "rx": 0, "total": 0}
+
+    save_json(USAGE_FILE, usage)
+    append_reset_log(
+        actor="system",
+        action="reset_usage_all_auto_day21",
+        target="all_users",
+        before=before_all,
+        after={u: {"tx": 0, "rx": 0, "total": 0} for u in users.keys()},
+        mk=month,
+    )
+    save_json(
+        RESET_STATE_FILE,
+        {
+            "last_reset_month": month,
+            "last_reset_time": now.isoformat(timespec="seconds"),
+        },
+    )
+
+
+def main():
+    users = load_json(USERS_FILE, {})
+    now = datetime.now()
+    month_key = billing_month_key(now)
+    traffic = get("/traffic?clear=1")
+    with usage_lock():
+        usage = load_json(USAGE_FILE, {})
+        usage.setdefault(month_key, {})
+        maybe_reset_all_usage_on_day_21(now, users, usage, month_key)
+        usage = load_json(USAGE_FILE, {})
+        usage.setdefault(month_key, {})
+
+        for uid, stat in traffic.items():
+            cur = normalize_usage_entry(usage[month_key].get(uid, 0))
+            tx = int(stat.get("tx", 0))
+            rx = int(stat.get("rx", 0))
+            cur["tx"] += tx
+            cur["rx"] += rx
+            cur["total"] += tx + rx
+            usage[month_key][uid] = cur
+
+        save_json(USAGE_FILE, usage)
+
+    online = get("/online")
+    save_json(ONLINE_SNAPSHOT_FILE, online)
+
+    to_kick = []
+    for uid, cfg in users.items():
+        if not cfg.get("guest"):
+            continue
+        quota = int(cfg.get("monthly_quota_bytes", 0))
+        if quota <= 0:
+            continue
+        used = normalize_usage_entry(usage[month_key].get(uid, 0))["total"]
+        if used >= quota and int(online.get(uid, 0)) > 0:
+            to_kick.append(uid)
+
+    if to_kick:
+        post("/kick", to_kick)
+
+
+if __name__ == "__main__":
+    main()

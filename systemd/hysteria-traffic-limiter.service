@@ -1,0 +1,9 @@
+[Unit]
+Description=Hysteria Traffic Limiter Sync
+After=network.target hysteria-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env python3 /root/hysteria/traffic_limiter.py
+User=root
+Group=root

@@ -1,0 +1,12 @@
+[Unit]
+Description=Hysteria UDP port hopping redirect rules
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hysteria-porthop.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

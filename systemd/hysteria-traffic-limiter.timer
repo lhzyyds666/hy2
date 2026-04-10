@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Hysteria Traffic Limiter every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+Unit=hysteria-traffic-limiter.service
+
+[Install]
+WantedBy=timers.target
