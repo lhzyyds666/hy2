@@ -36,9 +36,22 @@ sudo ./deploy.sh
 
 ## After deploy
 
-- **Admin panel**: `http://<server>:8080/admin` — on first visit you will be asked to set an admin password (stored hashed in `subscription_meta.json`).
-- **Add a user** from the panel; a subscription URL of the form `http://<host>:8080/sub/<name>?token=<token>` will be shown.
-- **Traffic panel**: `http://<server>:8080/panel/<user>?token=<token>` — per-user usage + device stats.
+The admin panel is served by `subscription_service.py` on `127.0.0.1:8081` and
+fronted by **nginx** on `:80`. `deploy.sh` installs both.
+
+- **Admin panel**: `http://<server>/admin` — on first visit you will be asked to set an admin password (stored hashed in `subscription_meta.json`).
+- **Add a user** from the panel; a subscription URL of the form `http://<host>/sub/<name>?token=<token>` will be shown.
+- **Traffic panel**: `http://<server>/panel/<user>?token=<token>` — per-user usage + device stats.
+
+Port layout on the server:
+
+| Port       | Service                                              |
+|------------|------------------------------------------------------|
+| `80/tcp`   | nginx → reverse proxies `127.0.0.1:8081` (panel/sub) |
+| `443/tcp`  | Xray — VLESS + Reality                               |
+| `443/udp`  | Hysteria2                                            |
+| `8443/tcp` | Xray — VLESS + Reality (backup)                      |
+| `20000-40000/udp` | iptables REDIRECT → `443/udp` (port hopping)  |
 
 ## Files NOT in git (by design)
 

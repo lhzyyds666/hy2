@@ -35,7 +35,7 @@ done
 log "Installing OS packages..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y >/dev/null
-apt-get install -y curl openssl iptables ca-certificates python3 >/dev/null
+apt-get install -y curl openssl iptables ca-certificates python3 nginx >/dev/null
 
 # ---------- 3. Install hysteria binary ----------
 if ! command -v hysteria >/dev/null 2>&1; then
@@ -107,7 +107,18 @@ fi
 # ---------- 8. Port hopping script ----------
 install -m 755 "$REPO_DIR/scripts/hysteria-porthop.sh" /usr/local/sbin/hysteria-porthop.sh
 
-# ---------- 9. Systemd units ----------
+# ---------- 9. nginx reverse proxy for the admin panel ----------
+# The subscription service only listens on 127.0.0.1:8081; nginx on :80 fronts it.
+log "Installing nginx site for hysteria-panel..."
+install -m 644 "$REPO_DIR/nginx/hysteria-panel.conf" /etc/nginx/sites-available/hysteria-panel.conf
+ln -sf /etc/nginx/sites-available/hysteria-panel.conf /etc/nginx/sites-enabled/hysteria-panel.conf
+# Remove the default site if it's still there (it would clash on :80).
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl enable --now nginx.service
+systemctl reload nginx.service
+
+# ---------- 10. Systemd units ----------
 log "Installing systemd units..."
 install -m 644 "$REPO_DIR/systemd/hysteria-server.service"           "$SYSTEMD_DIR/"
 install -m 644 "$REPO_DIR/systemd/hysteria-subscription.service"     "$SYSTEMD_DIR/"
@@ -117,7 +128,7 @@ install -m 644 "$REPO_DIR/systemd/hysteria-porthop.service"          "$SYSTEMD_D
 
 systemctl daemon-reload
 
-# ---------- 10. Enable + start ----------
+# ---------- 11. Enable + start ----------
 log "Enabling and starting services..."
 systemctl enable --now hysteria-porthop.service
 systemctl enable --now hysteria-server.service
@@ -134,7 +145,7 @@ done
 cat <<EOF
 
 Done. Open the admin panel at:
-  http://${HY_SERVER_HOST}:8080/admin
+  http://${HY_SERVER_HOST}/admin
 
 First-time setup:
   1. Log in (default admin credentials are generated into $HY_DIR/subscription_meta.json
