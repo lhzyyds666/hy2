@@ -2,9 +2,14 @@
 import json
 import os
 import fcntl
+import subprocess
 import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+
+XRAY_BIN = "/usr/local/bin/xray"
+XRAY_API = "127.0.0.1:10085"
+XRAY_EMAIL_BACKUP_SUFFIX = "-backup"
 
 USERS_FILE = "/root/hysteria/users.json"
 USAGE_FILE = "/root/hysteria/state/usage.json"
@@ -129,11 +134,48 @@ def maybe_reset_all_usage_on_day_21(now, users, usage, month):
     )
 
 
+def get_xray_traffic():
+    try:
+        out = subprocess.check_output(
+            [XRAY_BIN, "api", "statsquery", f"--server={XRAY_API}",
+             "-pattern", "user>>>", "-reset"],
+            timeout=3,
+            stderr=subprocess.DEVNULL,
+        )
+        data = json.loads(out.decode("utf-8"))
+    except Exception:
+        return {}
+    result = {}
+    for stat in data.get("stat") or []:
+        name = stat.get("name", "")
+        parts = name.split(">>>")
+        if len(parts) != 4 or parts[0] != "user" or parts[2] != "traffic":
+            continue
+        email = parts[1]
+        direction = parts[3]
+        uid = email[: -len(XRAY_EMAIL_BACKUP_SUFFIX)] if email.endswith(XRAY_EMAIL_BACKUP_SUFFIX) else email
+        val = int(stat.get("value", 0) or 0)
+        entry = result.setdefault(uid, {"tx": 0, "rx": 0})
+        if direction == "downlink":
+            entry["tx"] += val
+        elif direction == "uplink":
+            entry["rx"] += val
+    return result
+
+
+def merge_traffic(dst, src):
+    for uid, stat in src.items():
+        cur = dst.setdefault(uid, {"tx": 0, "rx": 0})
+        cur["tx"] = int(cur.get("tx", 0)) + int(stat.get("tx", 0))
+        cur["rx"] = int(cur.get("rx", 0)) + int(stat.get("rx", 0))
+
+
 def main():
     users = load_json(USERS_FILE, {})
     now = datetime.now()
     month_key = billing_month_key(now)
-    traffic = get("/traffic?clear=1")
+    traffic = get("/traffic?clear=1") or {}
+    merge_traffic(traffic, get_xray_traffic())
     with usage_lock():
         usage = load_json(USAGE_FILE, {})
         usage.setdefault(month_key, {})

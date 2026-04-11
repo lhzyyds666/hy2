@@ -9,6 +9,7 @@ import re
 import secrets
 import time
 import urllib.request
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from http.cookies import SimpleCookie
@@ -27,6 +28,80 @@ RESET_LOG_FILE = Path('/root/hysteria/state/usage_reset.log')
 USAGE_LOCK_FILE = Path('/root/hysteria/state/usage.lock')
 HY_API_BASE = 'http://127.0.0.1:25413'
 HY_API_SECRET = '__HY_API_SECRET__'
+
+
+XRAY_CONFIG_FILE = Path('/usr/local/etc/xray/config.json')
+XRAY_INBOUND_PORTS = (443, 8443)
+XRAY_BACKUP_SUFFIX = '-backup'
+
+
+def _xray_email_for(port, username):
+    return username if port == 443 else f'{username}{XRAY_BACKUP_SUFFIX}'
+
+
+def xray_sync_user(username, vless_uuid):
+    """Ensure username is present in every vless inbound with the given uuid. Returns True if file changed."""
+    try:
+        cfg = json.loads(XRAY_CONFIG_FILE.read_text(encoding='utf-8'))
+    except Exception:
+        return False
+    changed = False
+    for ib in cfg.get('inbounds') or []:
+        if ib.get('protocol') != 'vless':
+            continue
+        port = ib.get('port')
+        if port not in XRAY_INBOUND_PORTS:
+            continue
+        clients = ib.setdefault('settings', {}).setdefault('clients', [])
+        email = _xray_email_for(port, username)
+        found = None
+        for c in clients:
+            if c.get('email') == email:
+                found = c
+                break
+        if found is None:
+            clients.append({'id': vless_uuid, 'email': email, 'flow': 'xtls-rprx-vision'})
+            changed = True
+        elif found.get('id') != vless_uuid or found.get('flow') != 'xtls-rprx-vision':
+            found['id'] = vless_uuid
+            found['flow'] = 'xtls-rprx-vision'
+            changed = True
+    if changed:
+        XRAY_CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    return changed
+
+
+def xray_remove_user(username):
+    try:
+        cfg = json.loads(XRAY_CONFIG_FILE.read_text(encoding='utf-8'))
+    except Exception:
+        return False
+    changed = False
+    targets = {_xray_email_for(p, username) for p in XRAY_INBOUND_PORTS}
+    for ib in cfg.get('inbounds') or []:
+        if ib.get('protocol') != 'vless':
+            continue
+        clients = ib.get('settings', {}).get('clients') or []
+        new_clients = [c for c in clients if c.get('email') not in targets]
+        if len(new_clients) != len(clients):
+            ib['settings']['clients'] = new_clients
+            changed = True
+    if changed:
+        XRAY_CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    return changed
+
+
+def xray_reload_async():
+    """Restart xray without blocking the HTTP response or tying to the admin's ssh session."""
+    try:
+        import subprocess
+        subprocess.Popen(
+            ['systemd-run', '--no-block', '--unit', f'xray-reload-{int(time.time())}',
+             'systemctl', 'restart', 'xray'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
 
 
 def hy_kick(usernames):
@@ -258,12 +333,21 @@ def build_yaml(username, auth_secret):
     if not tpl:
         return ''
     text = tpl.read_text(encoding='utf-8')
-    return re.sub(
+    text = re.sub(
         r'(?m)^(\s*password:\s*).*$',
         lambda m: f'{m.group(1)}{username}:{auth_secret}',
         text,
         count=1,
     )
+    users = load_json(USERS_FILE, {})
+    vless_uuid = str((users.get(username) or {}).get('vless_uuid') or '').strip()
+    if vless_uuid:
+        text = re.sub(
+            r'(?m)^(\s*uuid:\s*).*$',
+            lambda m: f'{m.group(1)}{vless_uuid}',
+            text,
+        )
+    return text
 
 
 def fmt_bytes(num):
@@ -980,11 +1064,13 @@ class Handler(BaseHTTPRequestHandler):
             existing = users.get(username, {})
             existing_token = existing.get('sub_token')
             token = secrets.token_urlsafe(18) if (reset_token or not existing_token) else existing_token
+            vless_uuid = str(existing.get('vless_uuid') or '').strip() or str(uuid.uuid4())
             entry = {
                 'guest': guest,
                 'max_devices': 2,
                 'monthly_quota_bytes': max(1, quota_gb) * 1024 * 1024 * 1024,
                 'sub_token': token,
+                'vless_uuid': vless_uuid,
             }
             if password:
                 entry['password_hash'] = hash_secret(password)
@@ -992,6 +1078,8 @@ class Handler(BaseHTTPRequestHandler):
                 entry['password_hash'] = existing.get('password_hash')
             users[username] = entry
             save_json(USERS_FILE, users)
+            if xray_sync_user(username, vless_uuid):
+                xray_reload_async()
             self.redirect('/admin?msg=created+' + username)
             return
 
@@ -1054,6 +1142,8 @@ class Handler(BaseHTTPRequestHandler):
             del users[username]
             save_json(USERS_FILE, users)
             hy_kick([username])
+            if xray_remove_user(username):
+                xray_reload_async()
             self.redirect('/admin?msg=deleted+' + username)
             return
 
