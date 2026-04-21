@@ -8,8 +8,8 @@ import fcntl
 import re
 import secrets
 import time
-import urllib.request
 import uuid
+import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from http.cookies import SimpleCookie
@@ -21,13 +21,12 @@ USERS_FILE = Path('/root/hysteria/users.json')
 USAGE_FILE = Path('/root/hysteria/state/usage.json')
 ONLINE_FILE = Path('/root/hysteria/state/online.json')
 META_FILE = Path('/root/hysteria/subscription_meta.json')
-TEMPLATE_DIR = Path('/root')
-TEMPLATE_FILES = sorted(TEMPLATE_DIR.glob('*.yaml'))
+TEMPLATE_FILE = Path('/root/hysteria/template.yaml')
 SESSIONS_FILE = Path('/root/hysteria/state/panel_sessions.json')
 RESET_LOG_FILE = Path('/root/hysteria/state/usage_reset.log')
 USAGE_LOCK_FILE = Path('/root/hysteria/state/usage.lock')
 HY_API_BASE = 'http://127.0.0.1:25413'
-HY_API_SECRET = '__HY_API_SECRET__'
+HY_API_SECRET = '04a1533b4423ff31252a9b4b74ca85ae309399c0e3ef7688'
 
 
 XRAY_CONFIG_FILE = Path('/usr/local/etc/xray/config.json')
@@ -320,19 +319,10 @@ def user_total_quota(user_cfg):
     return int(user_cfg.get('monthly_quota_bytes', 0) or 0)
 
 
-def _template_for_user(username):
-    """Find the template matching the username, or fall back to the first one."""
-    for t in TEMPLATE_FILES:
-        if t.stem == username:
-            return t
-    return TEMPLATE_FILES[0] if TEMPLATE_FILES else None
-
-
 def build_yaml(username, auth_secret):
-    tpl = _template_for_user(username)
-    if not tpl:
+    if not TEMPLATE_FILE.exists():
         return ''
-    text = tpl.read_text(encoding='utf-8')
+    text = TEMPLATE_FILE.read_text(encoding='utf-8')
     text = re.sub(
         r'(?m)^(\s*password:\s*).*$',
         lambda m: f'{m.group(1)}{username}:{auth_secret}',
@@ -584,12 +574,12 @@ def row_form(user, cfg, online, host, base_url, usage_month=None):
     bar_cls = 'danger' if percent >= 90 else ''
     bar_w = f'{percent:.1f}'
     user_esc = html.escape(user)
-    return f'''<tr>
-<td>{user_esc}<div class="small">在线：{online.get(user, 0)} / {max_devices}</div></td>
+    return f'''<tr data-user="{user_esc}">
+<td>{user_esc}<div class="small">在线：<span data-role="online">{online.get(user, 0)}</span> / {max_devices}</div></td>
 <td>
-  <span style="font-weight:600;">{fmt_bytes(used)}</span><span class="small"> / {fmt_bytes(total)}</span>
-  <div class="mini-bar"><div class="mini-fill {bar_cls}" style="width:{bar_w}%"></div></div>
-  <div class="small">{percent:.1f}% | ↑{fmt_bytes(tx)} ↓{fmt_bytes(rx)}</div>
+  <span style="font-weight:600;" data-role="used">{fmt_bytes(used)}</span><span class="small"> / {fmt_bytes(total)}</span>
+  <div class="mini-bar"><div class="mini-fill {bar_cls}" data-role="bar" style="width:{bar_w}%"></div></div>
+  <div class="small" data-role="detail">{percent:.1f}% | ↑{fmt_bytes(tx)} ↓{fmt_bytes(rx)}</div>
 </td>
 <td>
 <details>
@@ -626,8 +616,29 @@ def render_admin(host, base_url, flash=''):
     rows = ''.join(row_form(u, cfg, online, host, base_url, usage_month) for u, cfg in users.items())
     body = f'''<div class="wrap"><div class="nav"><div class="brand">管理后台</div><span class="badge">{len(users)} 个用户</span></div>
 {alert}
-<div class="grid grid-3"><div class="card"><div class="k">本月总流量</div><div class="v big">{fmt_bytes(total_used)}</div></div><div class="card"><div class="k">统计月份</div><div class="v">{month_key()}</div></div><div class="card"><div class="k">操作</div><form method="post" action="/admin/reset-usage-all" onsubmit="return confirm('确认清空全部用户本月已用流量？')"><button class="btn secondary" type="submit">一键清空全部已用流量</button></form><a class="btn secondary" href="/admin/rules">路由规则</a><a class="btn secondary" href="/admin/logs">查看清零日志</a><a class="btn secondary" href="/logout">退出登录</a></div></div>
+<div class="grid grid-3"><div class="card"><div class="k">本月总流量</div><div class="v big" id="total-used">{fmt_bytes(total_used)}</div></div><div class="card"><div class="k">统计月份</div><div class="v">{month_key()}</div></div><div class="card"><div class="k">操作</div><form method="post" action="/admin/reset-usage-all" onsubmit="return confirm('确认清空全部用户本月已用流量？')"><button class="btn secondary" type="submit">一键清空全部已用流量</button></form><a class="btn secondary" href="/admin/config">模板配置</a><a class="btn secondary" href="/admin/rules">路由规则</a><a class="btn secondary" href="/admin/logs">查看清零日志</a><a class="btn secondary" href="/logout">退出登录</a></div></div>
 <div class="card" style="margin-top:14px; overflow:auto;"><table class="table"><thead><tr><th>用户</th><th>用量</th><th>操作</th><th>链接</th></tr></thead><tbody>{rows}</tbody></table></div>
+<script>
+(function(){{
+  function fmt(n){{n=Math.max(0,Number(n)||0);var u=['B','KB','MB','GB','TB'],i=0;while(n>=1024&&i<u.length-1){{n/=1024;i++;}}return n.toFixed(2)+' '+u[i];}}
+  async function tick(){{
+    try{{
+      var r=await fetch('/admin/usage.json',{{credentials:'same-origin',cache:'no-store'}});
+      if(!r.ok)return;
+      var d=await r.json();
+      var tu=document.getElementById('total-used');if(tu)tu.textContent=fmt(d.total_used);
+      (d.users||[]).forEach(function(u){{
+        var tr=document.querySelector('tr[data-user="'+CSS.escape(u.user)+'"]');if(!tr)return;
+        var on=tr.querySelector('[data-role="online"]');if(on)on.textContent=u.online;
+        var used=tr.querySelector('[data-role="used"]');if(used)used.textContent=fmt(u.used);
+        var bar=tr.querySelector('[data-role="bar"]');if(bar){{bar.style.width=u.percent.toFixed(1)+'%';bar.classList.toggle('danger',u.percent>=90);}}
+        var det=tr.querySelector('[data-role="detail"]');if(det)det.textContent=u.percent.toFixed(1)+'% | ↑'+fmt(u.tx)+' ↓'+fmt(u.rx);
+      }});
+    }}catch(e){{}}
+  }}
+  setInterval(tick,5000);
+}})();
+</script>
 <div class="card" style="margin-top:14px;"><details><summary style="font-size:14px;color:var(--muted);cursor:pointer;">▶ 新增用户</summary><form method="post" action="/admin/add" class="inline-form" style="margin-top:12px;"><div class="grid grid-3"><div><label>用户名</label><input name="user" required></div><div><label>兼容连接密码（可选）</label><input name="password" type="password" placeholder="默认仅用订阅 token 认证"></div><div><label>月流量上限 (GB)</label><input name="quota_gb" type="number" value="150" min="1"></div></div><div class="row" style="margin-top:8px;"><label class="switch"><input type="checkbox" name="guest" checked>客人用户</label><label class="switch"><input type="checkbox" name="reset_token">若用户已存在则重置订阅令牌</label></div><button class="btn" type="submit">创建用户</button></form></details></div>
 </div>'''
     return html_page('管理后台', body)
@@ -676,19 +687,155 @@ def render_reset_logs(host, limit=300):
     return html_page('清零日志', body)
 
 
-def load_template_rules():
-    """Load rules list from the first subscription YAML template."""
+def _load_yaml_file(path):
     import yaml
-    if not TEMPLATE_FILES:
+    text = path.read_text(encoding='utf-8')
+    return yaml.safe_load(text) or {}
+
+
+def _dump_yaml(data):
+    import yaml
+    return yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+
+def load_template_config():
+    """Load the subscription template as a dict. Returns {} if missing."""
+    if not TEMPLATE_FILE.exists():
+        return {}
+    return _load_yaml_file(TEMPLATE_FILE)
+
+
+def save_template_config(data):
+    """Save dict to the subscription template."""
+    TEMPLATE_FILE.write_text(_dump_yaml(data), encoding='utf-8')
+
+
+def render_config_editor(host, flash=''):
+    alert = ''
+    flash_map = {
+        'saved': '模板已保存，所有用户下次拉订阅将使用新配置',
+        'err:invalid_json': 'JSON 格式错误，请检查语法',
+        'err:empty': '配置内容不能为空',
+        'err:load_failed': '加载配置文件失败',
+    }
+    if flash:
+        is_err = flash.startswith('err:')
+        msg = flash_map.get(flash, flash)
+        cls = 'err' if is_err else 'flash'
+        alert = f'<div class="{cls}">{html.escape(msg)}</div>'
+
+    try:
+        data = load_template_config()
+        config_json = json.dumps(data, ensure_ascii=False, indent=2)
+    except Exception as e:
+        config_json = '{}'
+        if not flash:
+            alert = f'<div class="err">加载配置失败: {html.escape(str(e))}</div>'
+
+    body = f'''<div class="wrap"><div class="nav"><div class="brand">订阅模板配置</div><span class="badge">{html.escape(host)}</span></div>
+{alert}
+<div class="card" style="margin-bottom:14px;">
+<div class="small" style="margin-bottom:8px;">编辑订阅模板（JSON 格式）。保存后所有用户下次拉订阅即获得新配置，每个用户的密码和 UUID 由服务端从 users.json 自动注入。</div>
+<div class="small">模板文件：{html.escape(str(TEMPLATE_FILE))}</div>
+</div>
+<div class="card">
+<form method="post" action="/admin/config/save" id="configForm">
+<div style="position:relative;">
+<div id="jsonError" style="display:none;color:var(--danger);font-size:13px;margin-bottom:8px;"></div>
+<textarea name="config_json" id="configEditor"
+  style="width:100%;min-height:600px;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0e1628;color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.5;resize:vertical;tab-size:2;"
+  spellcheck="false">{html.escape(config_json)}</textarea>
+</div>
+<div class="row" style="margin-top:12px;">
+<button class="btn" type="submit">保存模板</button>
+<button class="btn secondary" type="button" onclick="formatJson()">格式化 JSON</button>
+<button class="btn secondary" type="button" onclick="collapseJson()">折叠/展开节点</button>
+<a class="btn secondary" href="/admin">返回管理后台</a>
+</div>
+</form>
+</div>
+</div>
+<script>
+var editor = document.getElementById('configEditor');
+var errorDiv = document.getElementById('jsonError');
+
+function validateJson() {{
+  try {{
+    JSON.parse(editor.value);
+    errorDiv.style.display = 'none';
+    editor.style.borderColor = 'var(--line)';
+    return true;
+  }} catch(e) {{
+    errorDiv.textContent = 'JSON 语法错误: ' + e.message;
+    errorDiv.style.display = 'block';
+    editor.style.borderColor = 'var(--danger)';
+    return false;
+  }}
+}}
+
+function formatJson() {{
+  try {{
+    var obj = JSON.parse(editor.value);
+    editor.value = JSON.stringify(obj, null, 2);
+    errorDiv.style.display = 'none';
+    editor.style.borderColor = 'var(--line)';
+  }} catch(e) {{
+    errorDiv.textContent = 'JSON 语法错误: ' + e.message;
+    errorDiv.style.display = 'block';
+    editor.style.borderColor = 'var(--danger)';
+  }}
+}}
+
+function collapseJson() {{
+  try {{
+    var obj = JSON.parse(editor.value);
+    var isCompact = !editor.value.includes('\\n');
+    editor.value = isCompact ? JSON.stringify(obj, null, 2) : JSON.stringify(obj);
+  }} catch(e) {{}}
+}}
+
+// Tab key inserts spaces
+editor.addEventListener('keydown', function(e) {{
+  if (e.key === 'Tab') {{
+    e.preventDefault();
+    var start = this.selectionStart;
+    var end = this.selectionEnd;
+    this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = start + 2;
+  }}
+}});
+
+// Live validation on input
+var validateTimer;
+editor.addEventListener('input', function() {{
+  clearTimeout(validateTimer);
+  validateTimer = setTimeout(validateJson, 500);
+}});
+
+// Validate before submit
+document.getElementById('configForm').addEventListener('submit', function(e) {{
+  if (!validateJson()) {{
+    e.preventDefault();
+    alert('JSON 格式错误，请修正后再保存');
+  }}
+}});
+</script>'''
+    return html_page('订阅模板配置', body)
+
+
+def load_template_rules():
+    """Load rules list from the subscription template."""
+    import yaml
+    if not TEMPLATE_FILE.exists():
         return []
-    text = TEMPLATE_FILES[0].read_text(encoding='utf-8')
+    text = TEMPLATE_FILE.read_text(encoding='utf-8')
     data = yaml.safe_load(text)
     return data.get('rules', [])
 
 
-def _write_rules_to_file(tpl_path, rules):
-    """Replace the rules section in a single YAML template file."""
-    text = tpl_path.read_text(encoding='utf-8')
+def save_template_rules(rules):
+    """Replace the rules section in the subscription template."""
+    text = TEMPLATE_FILE.read_text(encoding='utf-8')
     lines = text.split('\n')
     start = None
     end = len(lines)
@@ -706,13 +853,7 @@ def _write_rules_to_file(tpl_path, rules):
     else:
         cut = start - 1 if start > 0 and lines[start - 1].startswith('#') else start
         result = lines[:cut] + new_rule_lines + lines[end:]
-    tpl_path.write_text('\n'.join(result) + ('\n' if not result[-1].endswith('\n') else ''), encoding='utf-8')
-
-
-def save_template_rules(rules):
-    """Write rules to ALL subscription YAML templates."""
-    for tpl in TEMPLATE_FILES:
-        _write_rules_to_file(tpl, rules)
+    TEMPLATE_FILE.write_text('\n'.join(result) + ('\n' if not result[-1].endswith('\n') else ''), encoding='utf-8')
 
 
 def _parse_clash_rule(rule_str):
@@ -970,11 +1111,45 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response_body(200, render_admin(host, base_url, flash=flash), 'text/html; charset=utf-8', send_payload)
             return
 
+        if path == '/admin/usage.json':
+            if not is_logged_in(self):
+                self.send_response_body(403, '{"error":"unauthorized"}', 'application/json; charset=utf-8', send_payload)
+                return
+            users = load_json(USERS_FILE, {})
+            online = load_json(ONLINE_FILE, {})
+            usage_month = load_json(USAGE_FILE, {}).get(month_key(), {})
+            user_list = []
+            total_used = 0
+            for u, cfg in users.items():
+                tx, rx, used = usage_for_user(u, usage_month)
+                total = user_total_quota(cfg)
+                total_used += used
+                user_list.append({
+                    'user': u,
+                    'tx': tx,
+                    'rx': rx,
+                    'used': used,
+                    'total': total,
+                    'percent': pct(used, total),
+                    'online': int(online.get(u, 0)),
+                })
+            payload = json.dumps({'total_used': total_used, 'users': user_list}, ensure_ascii=True)
+            self.send_response_body(200, payload, 'application/json; charset=utf-8', send_payload)
+            return
+
         if path == '/admin/logs':
             if not is_logged_in(self):
                 self.redirect('/login')
                 return
             self.send_response_body(200, render_reset_logs(host), 'text/html; charset=utf-8', send_payload)
+            return
+
+        if path == '/admin/config':
+            if not is_logged_in(self):
+                self.redirect('/login')
+                return
+            flash = (q.get('msg') or [''])[0]
+            self.send_response_body(200, render_config_editor(host, flash=flash), 'text/html; charset=utf-8', send_payload)
             return
 
         if path == '/admin/rules':
@@ -1145,6 +1320,23 @@ class Handler(BaseHTTPRequestHandler):
             if xray_remove_user(username):
                 xray_reload_async()
             self.redirect('/admin?msg=deleted+' + username)
+            return
+
+        if path == '/admin/config/save':
+            if not is_logged_in(self):
+                self.redirect('/login')
+                return
+            raw = (form.get('config_json') or [''])[0].strip()
+            if not raw:
+                self.redirect('/admin/config?msg=err:empty')
+                return
+            try:
+                data = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                self.redirect('/admin/config?msg=err:invalid_json')
+                return
+            save_template_config(data)
+            self.redirect('/admin/config?msg=saved')
             return
 
         if path == '/admin/rules/add':

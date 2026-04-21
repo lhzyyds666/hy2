@@ -7,7 +7,6 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HY_DIR=/root/hysteria
 XRAY_ETC=/usr/local/etc/xray
 SYSTEMD_DIR=/etc/systemd/system
-TEMPLATE_DIR=/root  # subscription_service.py scans /root/*.yaml for clash templates
 
 log()  { printf '\033[1;32m[+]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*"; }
@@ -71,7 +70,7 @@ render() {
     "$src" > "$dst"
 }
 
-install -d -m 755 "$HY_DIR" "$HY_DIR/state" "$XRAY_ETC" "$TEMPLATE_DIR"
+install -d -m 755 "$HY_DIR" "$HY_DIR/state" "$XRAY_ETC"
 
 log "Rendering hysteria config and sources..."
 render "$REPO_DIR/hysteria/config.yaml.tpl"          "$HY_DIR/config.yaml"
@@ -81,8 +80,8 @@ render "$REPO_DIR/hysteria/traffic_limiter.py"       "$HY_DIR/traffic_limiter.py
 chmod 700 "$HY_DIR"/*.py
 chmod 600 "$HY_DIR/config.yaml"
 
-log "Rendering clash subscription template → $TEMPLATE_DIR/default.yaml"
-render "$REPO_DIR/hysteria/clash-default.yaml.tpl" "$TEMPLATE_DIR/default.yaml"
+log "Rendering clash subscription template → $HY_DIR/template.yaml"
+render "$REPO_DIR/hysteria/clash-default.yaml.tpl" "$HY_DIR/template.yaml"
 
 log "Rendering xray config.json..."
 render "$REPO_DIR/xray/config.json.tpl" "$XRAY_ETC/config.json"
