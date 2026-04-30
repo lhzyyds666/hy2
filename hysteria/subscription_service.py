@@ -26,7 +26,7 @@ SESSIONS_FILE = Path('/root/hysteria/state/panel_sessions.json')
 RESET_LOG_FILE = Path('/root/hysteria/state/usage_reset.log')
 USAGE_LOCK_FILE = Path('/root/hysteria/state/usage.lock')
 HY_API_BASE = 'http://127.0.0.1:25413'
-HY_API_SECRET = '04a1533b4423ff31252a9b4b74ca85ae309399c0e3ef7688'
+HY_API_SECRET = '__HY_API_SECRET__'
 
 
 XRAY_CONFIG_FILE = Path('/usr/local/etc/xray/config.json')
