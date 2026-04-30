@@ -141,6 +141,8 @@ body {
   color: var(--text);
 }
 .wrap { max-width: 1140px; margin: 28px auto; padding: 0 16px; }
+.wrap.home-wrap { max-width: 480px; margin-top: 80px; }
+.brand.brand-lg { font-size: 18px; margin-bottom: 16px; }
 .nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .brand { font-weight: 700; letter-spacing: 0.5px; }
 .badge { background: var(--panel-soft); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 6px 10px; font-size: 12px; }
@@ -161,6 +163,8 @@ body {
 code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; background: #0e1628; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; word-break: break-all; }
 .btn { display: inline-block; margin-top: 10px; background: var(--accent); color: #062219; border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; font-weight: 700; text-decoration: none; }
 .btn.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn.danger-btn { background: var(--danger); color: #fff; }
+.btn.btn-sm { padding: 4px 10px; font-size: 12px; }
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th, .table td { border-bottom: 1px solid var(--line); padding: 10px 8px; text-align: left; vertical-align: top; }
 .table th { color: var(--muted); font-weight: 600; }
@@ -169,6 +173,23 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas
 .inline-form input, .inline-form select { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: #0e1628; color: var(--text); }
 .inline-form label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 13px; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; }
+.mt-sm { margin-top: 6px; }
+.mt-md { margin-top: 14px; }
+.scroll-x { overflow: auto; }
+.center-narrow { max-width: 520px; margin: 0 auto; }
+.system-row { color: var(--muted); }
+.bold { font-weight: 600; }
+.muted { color: var(--muted); }
+.break { word-break: break-all; }
+.inline-form-row { display: inline; }
+.mb-sm { margin-bottom: 8px; }
+.mb-md { margin-bottom: 14px; }
+.code-area { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: #0e1628; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; line-height: 1.5; resize: vertical; tab-size: 2; }
+.code-area.code-tall { min-height: 600px; }
+.code-area.code-med { min-height: 360px; line-height: 1.6; }
+.json-error { display: none; color: var(--danger); font-size: 13px; margin-bottom: 8px; }
+.json-error.visible { display: block; }
+.code-area.invalid { border-color: var(--danger); }
 label.switch { display: inline-flex; align-items: center; gap: 6px; }
 .flash { background: #143124; border: 1px solid #2a6a50; color: #98f2ca; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
 .err { background: #3a1d23; border: 1px solid #7f2f3b; color: #ffb3c0; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
@@ -177,10 +198,14 @@ details > summary::before { content: '▶ '; font-size: 10px; }
 details[open] > summary::before { content: '▼ '; }
 details > summary:hover { color: var(--text); }
 details[open] > summary { margin-bottom: 10px; }
-@keyframes flash-fade { 0%,70%{opacity:1} 100%{opacity:0} }
-.flash, .err { animation: flash-fade 4s forwards; }
+details.summary-muted > summary { color: var(--muted); font-size: 14px; }
+@keyframes flash-fade { 0%,70%{opacity:1;visibility:visible} 99%{opacity:0;visibility:visible} 100%{opacity:0;visibility:hidden;height:0;padding:0;margin:0;border:0} }
+.flash, .err { animation: flash-fade 4s forwards; overflow: hidden; }
 @media (max-width: 980px) { .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; } .hero { font-size: 26px; } }
 """
+
+BASE_CSS_BYTES = BASE_CSS.encode('utf-8')
+BASE_CSS_ETAG = '"' + hashlib.sha1(BASE_CSS_BYTES).hexdigest()[:16] + '"'
 
 
 def load_json(path, default):
@@ -188,6 +213,25 @@ def load_json(path, default):
         return json.loads(path.read_text(encoding='utf-8'))
     except Exception:
         return default
+
+
+_JSON_CACHE = {}
+
+
+def load_json_cached(path, default, ttl=2.0):
+    """Cache JSON file reads keyed on (path, mtime). Cleared automatically when the file mtime changes."""
+    try:
+        mt = path.stat().st_mtime
+    except OSError:
+        return default
+    key = str(path)
+    now = time.monotonic()
+    hit = _JSON_CACHE.get(key)
+    if hit and hit[0] == mt and (now - hit[1]) < ttl:
+        return hit[2]
+    data = load_json(path, default)
+    _JSON_CACHE[key] = (mt, now, data)
+    return data
 
 
 def save_json(path, data):
@@ -457,15 +501,37 @@ def html_page(title, body):
     return (
         f'<!doctype html><html><head><meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<title>{title}</title>'
+        f'<title>{html.escape(title)}</title>'
         f'<link rel="stylesheet" href="/static/style.css">'
-        f'</head><body>{body}'
-        f'<script>document.addEventListener("DOMContentLoaded",function(){{'
-        f'var f=document.querySelector(".flash,.err");'
-        f'if(f)setTimeout(function(){{f.style.transition="opacity 0.6s";f.style.opacity="0";'
-        f'setTimeout(function(){{f.remove()}},650);}},3500);}});</script>'
-        f'</body></html>'
+        f'</head><body>{body}</body></html>'
     )
+
+
+def render_nav(brand, badge):
+    return (
+        f'<div class="nav"><div class="brand">{html.escape(brand)}</div>'
+        f'<span class="badge">{html.escape(badge)}</span></div>'
+    )
+
+
+def render_alert(msg, kind='flash'):
+    if not msg:
+        return ''
+    return f'<div class="{kind}">{html.escape(msg)}</div>'
+
+
+def render_prefixed_alert(flash, msg_map):
+    """Resolve a flash code that may carry an 'err:' prefix and render the alert."""
+    if not flash:
+        return ''
+    is_err = flash.startswith('err:')
+    key = flash.removeprefix('err:')
+    msg = msg_map.get(key, key)
+    return render_alert(msg, 'err' if is_err else 'flash')
+
+
+def back_to_admin(label='返回管理后台'):
+    return f'<a class="btn secondary" href="/admin">{html.escape(label)}</a>'
 
 
 def flash_text(msg):
@@ -492,21 +558,20 @@ def flash_text(msg):
 
 
 def render_home(host):
-    body = f'''<div class="wrap" style="max-width:480px;margin-top:80px;">
+    body = '''<div class="wrap home-wrap">
 <div class="card inline-form">
-<div class="brand" style="font-size:18px;margin-bottom:16px;">Hysteria 管理后台</div>
+<div class="brand brand-lg">Hysteria 管理后台</div>
 <a class="btn" href="/login">管理员登录</a>
 </div></div>'''
     return html_page('Hysteria', body)
 
 
 def render_login(host, msg=''):
-    notice = f'<div class="err">{html.escape(msg)}</div>' if msg else ''
-    body = f'''<div class="wrap"><div class="nav"><div class="brand">管理员登录</div><span class="badge">{html.escape(host)}</span></div>
-{notice}
-<div class="card inline-form" style="max-width:520px; margin:auto;"><form method="post" action="/login">
+    body = f'''<div class="wrap">{render_nav('管理员登录', host)}
+{render_alert(msg, 'err')}
+<div class="card inline-form center-narrow"><form method="post" action="/login">
 <label>用户名</label><input name="username" required>
-<label style="margin-top:10px;">密码</label><input name="password" type="password" required>
+<label class="mt-sm">密码</label><input name="password" type="password" required>
 <button class="btn" type="submit">登录管理后台</button>
 <a class="btn secondary" href="/">返回首页</a>
 </form></div></div>'''
@@ -523,41 +588,20 @@ def render_user_panel(host, base_url, user, token, cfg):
     sub_path = f'/sub/{user}?token={token}'
     panel_path = f'/panel/{user}?token={token}'
     sub_http = f'{base_url}{sub_path}'
-    body = f'''<div class="wrap"><div class="nav"><div class="brand">用户面板</div><span class="badge">{html.escape(user)}</span></div>
+    panel_http = f'{base_url}{panel_path}'
+    body = f'''<div class="wrap">{render_nav('用户面板', user)}
 <div class="grid grid-4"><div class="card"><div class="k">本月已用</div><div class="v big">{fmt_bytes(used)}</div></div><div class="card"><div class="k">总流量</div><div class="v">{fmt_bytes(total)}</div></div><div class="card"><div class="k">剩余流量</div><div class="v">{fmt_bytes(remain)}</div></div><div class="card"><div class="k">在线设备</div><div class="v">{online} / {int(cfg.get('max_devices', 0) or 0)}</div></div></div>
-<div class="card" style="margin-top:14px;"><div class="k">流量进度 {percent:.2f}%</div><div class="bar"><div class="fill {cls}" style="width:{percent:.2f}%"></div></div><div class="small" style="margin-top:8px;">上传: {fmt_bytes(tx)} | 下载: {fmt_bytes(rx)}</div></div>
-<div class="grid grid-2" style="margin-top:14px;"><div class="card"><div class="k">订阅链接</div><div class="mono" id="sub">{html.escape(sub_http)}</div><div class="row"><button class="btn" onclick="copySub()">复制订阅链接</button><a class="btn secondary" href="{html.escape(sub_path)}">打开订阅</a></div></div><div class="card"><div class="k">当前面板链接</div><div class="mono">{html.escape(base_url)}{html.escape(panel_path)}</div><div class="row"><a class="btn secondary" href="/">返回首页</a></div></div></div>
+<div class="card mt-md"><div class="k">流量进度 {percent:.2f}%</div><div class="bar"><div class="fill {cls}" style="width:{percent:.2f}%"></div></div><div class="small mt-sm">上传: {fmt_bytes(tx)} | 下载: {fmt_bytes(rx)}</div></div>
+<div class="grid grid-2 mt-md"><div class="card"><div class="k">订阅链接</div><div class="mono" id="sub">{html.escape(sub_http)}</div><div class="row"><button class="btn" id="copy-sub-btn" type="button">复制订阅链接</button><a class="btn secondary" href="{html.escape(sub_path)}">打开订阅</a></div></div><div class="card"><div class="k">当前面板链接</div><div class="mono">{html.escape(panel_http)}</div><div class="row"><a class="btn secondary" href="/">返回首页</a></div></div></div>
 </div>
 <script>
-function copySub(){{
-  const text = document.getElementById('sub').innerText;
-  if (navigator.clipboard && window.isSecureContext) {{
-    navigator.clipboard.writeText(text).then(() => {{
-      alert('已复制订阅链接');
-    }}).catch(() => {{
-      fallbackCopy(text);
-    }});
-    return;
-  }}
-  fallbackCopy(text);
-}}
-
-function fallbackCopy(text) {{
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.position = 'fixed';
-  ta.style.left = '-9999px';
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
-  try {{
-    const ok = document.execCommand('copy');
-    alert(ok ? '已复制订阅链接' : '复制失败，请手动复制');
-  }} catch (e) {{
-    alert('复制失败，请手动复制');
-  }}
-  document.body.removeChild(ta);
-}}
+document.getElementById('copy-sub-btn').addEventListener('click', function() {{
+  var text = document.getElementById('sub').textContent;
+  if (!navigator.clipboard) {{ alert('当前环境不支持自动复制，请手动选中链接复制'); return; }}
+  navigator.clipboard.writeText(text)
+    .then(function() {{ alert('已复制订阅链接'); }})
+    .catch(function() {{ alert('复制失败，请手动复制'); }});
+}});
 </script>'''
     return html_page(f'{user} 用户面板', body)
 
@@ -577,7 +621,7 @@ def row_form(user, cfg, online, host, base_url, usage_month=None):
     return f'''<tr data-user="{user_esc}">
 <td>{user_esc}<div class="small">在线：<span data-role="online">{online.get(user, 0)}</span> / {max_devices}</div></td>
 <td>
-  <span style="font-weight:600;" data-role="used">{fmt_bytes(used)}</span><span class="small"> / {fmt_bytes(total)}</span>
+  <span class="bold" data-role="used">{fmt_bytes(used)}</span><span class="small"> / {fmt_bytes(total)}</span>
   <div class="mini-bar"><div class="mini-fill {bar_cls}" data-role="bar" style="width:{bar_w}%"></div></div>
   <div class="small" data-role="detail">{percent:.1f}% | ↑{fmt_bytes(tx)} ↓{fmt_bytes(rx)}</div>
 </td>
@@ -587,19 +631,19 @@ def row_form(user, cfg, online, host, base_url, usage_month=None):
 <form method="post" action="/admin/update" class="inline-form">
 <input type="hidden" name="user" value="{user_esc}">
 <label>兼容连接密码（可选）</label><input name="password" type="password" placeholder="留空则不修改">
-<label style="margin-top:8px;">设备数上限</label><input name="max_devices" type="number" min="1" value="{max_devices or 2}">
-<label style="margin-top:8px;">月流量上限 (GB)</label><input name="quota_gb" type="number" min="1" value="{quota_gb or 150}">
-<label class="switch" style="margin-top:8px;"><input type="checkbox" name="guest" {guest_checked}>客人用户</label>
+<label class="mt-sm">设备数上限</label><input name="max_devices" type="number" min="1" value="{max_devices or 2}">
+<label class="mt-sm">月流量上限 (GB)</label><input name="quota_gb" type="number" min="1" value="{quota_gb or 150}">
+<label class="switch mt-sm"><input type="checkbox" name="guest" {guest_checked}>客人用户</label>
 <button class="btn" type="submit">保存</button>
 </form>
 </details>
-<form method="post" action="/admin/reset-usage" class="inline-form" style="margin-top:6px;">
+<form method="post" action="/admin/reset-usage" class="inline-form mt-sm">
 <input type="hidden" name="user" value="{user_esc}">
 <button class="btn secondary" type="submit">清除流量</button>
 </form>
-<form method="post" action="/admin/delete" class="inline-form" style="margin-top:6px;" onsubmit="return confirm('确认删除用户 {user_esc}？此操作不可撤销。')">
+<form method="post" action="/admin/delete" class="inline-form mt-sm" data-action="delete-user">
 <input type="hidden" name="user" value="{user_esc}">
-<button class="btn" style="background:var(--danger);color:#fff;" type="submit">删除</button>
+<button class="btn danger-btn" type="submit">删除</button>
 </form>
 </td>
 <td><a href="{html.escape(panel)}">用户面板</a><br><a href="{html.escape(sub_http)}">订阅链接</a></td>
@@ -611,35 +655,51 @@ def render_admin(host, base_url, flash=''):
     online = load_json(ONLINE_FILE, {})
     usage_month = load_json(USAGE_FILE, {}).get(month_key(), {})
     total_used = sum(usage_for_user(u, usage_month)[2] for u in users)
-    flash = flash_text(flash)
-    alert = f'<div class="flash">{html.escape(flash)}</div>' if flash else ''
+    alert = render_alert(flash_text(flash))
     rows = ''.join(row_form(u, cfg, online, host, base_url, usage_month) for u, cfg in users.items())
-    body = f'''<div class="wrap"><div class="nav"><div class="brand">管理后台</div><span class="badge">{len(users)} 个用户</span></div>
+    body = f'''<div class="wrap">{render_nav('管理后台', f'{len(users)} 个用户')}
 {alert}
-<div class="grid grid-3"><div class="card"><div class="k">本月总流量</div><div class="v big" id="total-used">{fmt_bytes(total_used)}</div></div><div class="card"><div class="k">统计月份</div><div class="v">{month_key()}</div></div><div class="card"><div class="k">操作</div><form method="post" action="/admin/reset-usage-all" onsubmit="return confirm('确认清空全部用户本月已用流量？')"><button class="btn secondary" type="submit">一键清空全部已用流量</button></form><a class="btn secondary" href="/admin/config">模板配置</a><a class="btn secondary" href="/admin/rules">路由规则</a><a class="btn secondary" href="/admin/logs">查看清零日志</a><a class="btn secondary" href="/logout">退出登录</a></div></div>
-<div class="card" style="margin-top:14px; overflow:auto;"><table class="table"><thead><tr><th>用户</th><th>用量</th><th>操作</th><th>链接</th></tr></thead><tbody>{rows}</tbody></table></div>
+<div class="grid grid-3"><div class="card"><div class="k">本月总流量</div><div class="v big" id="total-used">{fmt_bytes(total_used)}</div></div><div class="card"><div class="k">统计月份</div><div class="v">{month_key()}</div></div><div class="card"><div class="k">操作</div><form method="post" action="/admin/reset-usage-all" data-action="reset-all"><button class="btn secondary" type="submit">一键清空全部已用流量</button></form><a class="btn secondary" href="/admin/config">模板配置</a><a class="btn secondary" href="/admin/rules">路由规则</a><a class="btn secondary" href="/admin/logs">查看清零日志</a><a class="btn secondary" href="/logout">退出登录</a></div></div>
+<div class="card mt-md scroll-x"><table class="table"><thead><tr><th>用户</th><th>用量</th><th>操作</th><th>链接</th></tr></thead><tbody>{rows}</tbody></table></div>
 <script>
 (function(){{
   function fmt(n){{n=Math.max(0,Number(n)||0);var u=['B','KB','MB','GB','TB'],i=0;while(n>=1024&&i<u.length-1){{n/=1024;i++;}}return n.toFixed(2)+' '+u[i];}}
+  function setText(el,v){{ if(el && el.textContent!==v) el.textContent=v; }}
+  function setStyle(el,prop,v){{ if(el && el.style[prop]!==v) el.style[prop]=v; }}
+  function setClass(el,cls,on){{ if(el && el.classList.contains(cls)!==on) el.classList.toggle(cls,on); }}
   async function tick(){{
     try{{
       var r=await fetch('/admin/usage.json',{{credentials:'same-origin',cache:'no-store'}});
-      if(!r.ok)return;
+      if(!r.ok) return;
       var d=await r.json();
-      var tu=document.getElementById('total-used');if(tu)tu.textContent=fmt(d.total_used);
+      setText(document.getElementById('total-used'), fmt(d.total_used));
       (d.users||[]).forEach(function(u){{
-        var tr=document.querySelector('tr[data-user="'+CSS.escape(u.user)+'"]');if(!tr)return;
-        var on=tr.querySelector('[data-role="online"]');if(on)on.textContent=u.online;
-        var used=tr.querySelector('[data-role="used"]');if(used)used.textContent=fmt(u.used);
-        var bar=tr.querySelector('[data-role="bar"]');if(bar){{bar.style.width=u.percent.toFixed(1)+'%';bar.classList.toggle('danger',u.percent>=90);}}
-        var det=tr.querySelector('[data-role="detail"]');if(det)det.textContent=u.percent.toFixed(1)+'% | ↑'+fmt(u.tx)+' ↓'+fmt(u.rx);
+        var tr=document.querySelector('tr[data-user="'+CSS.escape(u.user)+'"]');
+        if(!tr) return;
+        setText(tr.querySelector('[data-role="online"]'), String(u.online));
+        setText(tr.querySelector('[data-role="used"]'), fmt(u.used));
+        var bar=tr.querySelector('[data-role="bar"]');
+        if(bar){{ setStyle(bar,'width', u.percent.toFixed(1)+'%'); setClass(bar,'danger', u.percent>=90); }}
+        setText(tr.querySelector('[data-role="detail"]'), u.percent.toFixed(1)+'% | ↑'+fmt(u.tx)+' ↓'+fmt(u.rx));
       }});
     }}catch(e){{}}
   }}
-  setInterval(tick,5000);
+  setInterval(tick, 5000);
+  document.addEventListener('submit', function(ev){{
+    var f=ev.target;
+    if(!f || f.tagName!=='FORM') return;
+    if(f.dataset.action==='delete-user'){{
+      var name=(f.closest('tr')||{{}}).dataset && f.closest('tr').dataset.user || '';
+      if(!confirm('确认删除用户 '+name+'？此操作不可撤销。')) ev.preventDefault();
+    }} else if(f.dataset.action==='reset-all'){{
+      if(!confirm('确认清空全部用户本月已用流量？')) ev.preventDefault();
+    }} else if(f.dataset.action==='delete-rule'){{
+      if(!confirm('确认删除此规则？')) ev.preventDefault();
+    }}
+  }});
 }})();
 </script>
-<div class="card" style="margin-top:14px;"><details><summary style="font-size:14px;color:var(--muted);cursor:pointer;">▶ 新增用户</summary><form method="post" action="/admin/add" class="inline-form" style="margin-top:12px;"><div class="grid grid-3"><div><label>用户名</label><input name="user" required></div><div><label>兼容连接密码（可选）</label><input name="password" type="password" placeholder="默认仅用订阅 token 认证"></div><div><label>月流量上限 (GB)</label><input name="quota_gb" type="number" value="150" min="1"></div></div><div class="row" style="margin-top:8px;"><label class="switch"><input type="checkbox" name="guest" checked>客人用户</label><label class="switch"><input type="checkbox" name="reset_token">若用户已存在则重置订阅令牌</label></div><button class="btn" type="submit">创建用户</button></form></details></div>
+<div class="card mt-md"><details class="summary-muted"><summary>新增用户</summary><form method="post" action="/admin/add" class="inline-form mt-md"><div class="grid grid-3"><div><label>用户名</label><input name="user" required></div><div><label>兼容连接密码（可选）</label><input name="password" type="password" placeholder="默认仅用订阅 token 认证"></div><div><label>月流量上限 (GB)</label><input name="quota_gb" type="number" value="150" min="1"></div></div><div class="row mt-sm"><label class="switch"><input type="checkbox" name="guest" checked>客人用户</label><label class="switch"><input type="checkbox" name="reset_token">若用户已存在则重置订阅令牌</label></div><button class="btn" type="submit">创建用户</button></form></details></div>
 </div>'''
     return html_page('管理后台', body)
 
@@ -649,38 +709,41 @@ def _action_label(action):
 
 
 def render_reset_logs(host, limit=300):
+    from collections import deque
     rows = []
-    if RESET_LOG_FILE.exists():
+    try:
         with RESET_LOG_FILE.open('r', encoding='utf-8') as f:
-            raw_lines = f.readlines()[-limit:]
-        for line in reversed(raw_lines):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except Exception:
-                continue
-            t = html.escape(str(entry.get('time', '')))
-            actor = html.escape(str(entry.get('actor', '')))
-            ip = html.escape(str(entry.get('ip', '')))
-            action = html.escape(_action_label(str(entry.get('action', ''))))
-            target = html.escape(str(entry.get('target', '')))
-            month = html.escape(str(entry.get('month', '')))
-            before = entry.get('before', {})
-            after = entry.get('after', {})
-            if isinstance(before, dict) and 'total' in before:
-                detail = f'{fmt_bytes(before.get("total", 0))} → {fmt_bytes(after.get("total", 0))}'
-            else:
-                detail = ''
-            rows.append(f'<tr><td class="small">{t}</td><td>{actor}</td><td class="small">{ip}</td>'
-                        f'<td>{action}</td><td>{target}</td><td class="small">{month}</td>'
-                        f'<td class="small">{html.escape(detail)}</td></tr>')
-    table = (''.join(rows)) if rows else '<tr><td colspan="7" style="color:var(--muted)">暂无日志记录</td></tr>'
-    body = f'''<div class="wrap"><div class="nav"><div class="brand">清零日志</div><span class="badge">{html.escape(host)}</span></div>
+            raw_lines = list(deque(f, maxlen=limit))
+    except FileNotFoundError:
+        raw_lines = []
+    for line in reversed(raw_lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        t = html.escape(str(entry.get('time', '')))
+        actor = html.escape(str(entry.get('actor', '')))
+        ip = html.escape(str(entry.get('ip', '')))
+        action = html.escape(_action_label(str(entry.get('action', ''))))
+        target = html.escape(str(entry.get('target', '')))
+        month = html.escape(str(entry.get('month', '')))
+        before = entry.get('before', {})
+        after = entry.get('after', {})
+        if isinstance(before, dict) and 'total' in before:
+            detail = f'{fmt_bytes(before.get("total", 0))} → {fmt_bytes(after.get("total", 0))}'
+        else:
+            detail = ''
+        rows.append(f'<tr><td class="small">{t}</td><td>{actor}</td><td class="small">{ip}</td>'
+                    f'<td>{action}</td><td>{target}</td><td class="small">{month}</td>'
+                    f'<td class="small">{html.escape(detail)}</td></tr>')
+    table = ''.join(rows) if rows else '<tr><td colspan="7" class="muted">暂无日志记录</td></tr>'
+    body = f'''<div class="wrap">{render_nav('清零日志', host)}
 <div class="card"><div class="k">展示最近 {limit} 条，最新在最上方</div>
-<div class="row"><a class="btn secondary" href="/admin">返回管理后台</a></div></div>
-<div class="card" style="margin-top:14px; overflow:auto;">
+<div class="row">{back_to_admin()}</div></div>
+<div class="card mt-md scroll-x">
 <table class="table"><thead><tr><th>时间</th><th>操作人</th><th>IP</th><th>操作</th><th>目标</th><th>月份</th><th>流量变化</th></tr></thead>
 <tbody>{table}</tbody></table></div>
 </div>'''
@@ -710,19 +773,16 @@ def save_template_config(data):
     TEMPLATE_FILE.write_text(_dump_yaml(data), encoding='utf-8')
 
 
+_CONFIG_FLASH = {
+    'saved': '模板已保存，所有用户下次拉订阅将使用新配置',
+    'invalid_json': 'JSON 格式错误，请检查语法',
+    'empty': '配置内容不能为空',
+    'load_failed': '加载配置文件失败',
+}
+
+
 def render_config_editor(host, flash=''):
-    alert = ''
-    flash_map = {
-        'saved': '模板已保存，所有用户下次拉订阅将使用新配置',
-        'err:invalid_json': 'JSON 格式错误，请检查语法',
-        'err:empty': '配置内容不能为空',
-        'err:load_failed': '加载配置文件失败',
-    }
-    if flash:
-        is_err = flash.startswith('err:')
-        msg = flash_map.get(flash, flash)
-        cls = 'err' if is_err else 'flash'
-        alert = f'<div class="{cls}">{html.escape(msg)}</div>'
+    alert = render_prefixed_alert(flash, _CONFIG_FLASH)
 
     try:
         data = load_template_config()
@@ -730,95 +790,64 @@ def render_config_editor(host, flash=''):
     except Exception as e:
         config_json = '{}'
         if not flash:
-            alert = f'<div class="err">加载配置失败: {html.escape(str(e))}</div>'
+            alert = render_alert(f'加载配置失败: {e}', 'err')
 
-    body = f'''<div class="wrap"><div class="nav"><div class="brand">订阅模板配置</div><span class="badge">{html.escape(host)}</span></div>
+    body = f'''<div class="wrap">{render_nav('订阅模板配置', host)}
 {alert}
-<div class="card" style="margin-bottom:14px;">
-<div class="small" style="margin-bottom:8px;">编辑订阅模板（JSON 格式）。保存后所有用户下次拉订阅即获得新配置，每个用户的密码和 UUID 由服务端从 users.json 自动注入。</div>
+<div class="card mb-md">
+<div class="small mb-sm">编辑订阅模板（JSON 格式）。保存后所有用户下次拉订阅即获得新配置，每个用户的密码和 UUID 由服务端从 users.json 自动注入。</div>
 <div class="small">模板文件：{html.escape(str(TEMPLATE_FILE))}</div>
 </div>
 <div class="card">
 <form method="post" action="/admin/config/save" id="configForm">
-<div style="position:relative;">
-<div id="jsonError" style="display:none;color:var(--danger);font-size:13px;margin-bottom:8px;"></div>
-<textarea name="config_json" id="configEditor"
-  style="width:100%;min-height:600px;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0e1628;color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.5;resize:vertical;tab-size:2;"
-  spellcheck="false">{html.escape(config_json)}</textarea>
-</div>
-<div class="row" style="margin-top:12px;">
+<div id="jsonError" class="json-error"></div>
+<textarea name="config_json" id="configEditor" class="code-area code-tall" spellcheck="false">{html.escape(config_json)}</textarea>
+<div class="row mt-md">
 <button class="btn" type="submit">保存模板</button>
-<button class="btn secondary" type="button" onclick="formatJson()">格式化 JSON</button>
-<button class="btn secondary" type="button" onclick="collapseJson()">折叠/展开节点</button>
-<a class="btn secondary" href="/admin">返回管理后台</a>
+<button class="btn secondary" type="button" id="cfgFormat">格式化 JSON</button>
+<button class="btn secondary" type="button" id="cfgCollapse">折叠/展开节点</button>
+{back_to_admin()}
 </div>
 </form>
 </div>
 </div>
 <script>
-var editor = document.getElementById('configEditor');
-var errorDiv = document.getElementById('jsonError');
-
-function validateJson() {{
-  try {{
-    JSON.parse(editor.value);
-    errorDiv.style.display = 'none';
-    editor.style.borderColor = 'var(--line)';
-    return true;
-  }} catch(e) {{
-    errorDiv.textContent = 'JSON 语法错误: ' + e.message;
-    errorDiv.style.display = 'block';
-    editor.style.borderColor = 'var(--danger)';
-    return false;
+(function(){{
+  var editor = document.getElementById('configEditor');
+  var errorDiv = document.getElementById('jsonError');
+  function showError(msg) {{ errorDiv.textContent=msg; errorDiv.classList.add('visible'); editor.classList.add('invalid'); }}
+  function clearError() {{ errorDiv.classList.remove('visible'); editor.classList.remove('invalid'); }}
+  function validateJson() {{
+    try {{ JSON.parse(editor.value); clearError(); return true; }}
+    catch(e) {{ showError('JSON 语法错误: ' + e.message); return false; }}
   }}
-}}
-
-function formatJson() {{
-  try {{
-    var obj = JSON.parse(editor.value);
-    editor.value = JSON.stringify(obj, null, 2);
-    errorDiv.style.display = 'none';
-    editor.style.borderColor = 'var(--line)';
-  }} catch(e) {{
-    errorDiv.textContent = 'JSON 语法错误: ' + e.message;
-    errorDiv.style.display = 'block';
-    editor.style.borderColor = 'var(--danger)';
-  }}
-}}
-
-function collapseJson() {{
-  try {{
-    var obj = JSON.parse(editor.value);
-    var isCompact = !editor.value.includes('\\n');
-    editor.value = isCompact ? JSON.stringify(obj, null, 2) : JSON.stringify(obj);
-  }} catch(e) {{}}
-}}
-
-// Tab key inserts spaces
-editor.addEventListener('keydown', function(e) {{
-  if (e.key === 'Tab') {{
+  document.getElementById('cfgFormat').addEventListener('click', function() {{
+    try {{ editor.value = JSON.stringify(JSON.parse(editor.value), null, 2); clearError(); }}
+    catch(e) {{ showError('JSON 语法错误: ' + e.message); }}
+  }});
+  document.getElementById('cfgCollapse').addEventListener('click', function() {{
+    try {{
+      var obj = JSON.parse(editor.value);
+      var isCompact = !editor.value.includes('\\n');
+      editor.value = isCompact ? JSON.stringify(obj, null, 2) : JSON.stringify(obj);
+    }} catch(e) {{}}
+  }});
+  editor.addEventListener('keydown', function(e) {{
+    if (e.key !== 'Tab') return;
     e.preventDefault();
-    var start = this.selectionStart;
-    var end = this.selectionEnd;
-    this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
-    this.selectionStart = this.selectionEnd = start + 2;
-  }}
-}});
-
-// Live validation on input
-var validateTimer;
-editor.addEventListener('input', function() {{
-  clearTimeout(validateTimer);
-  validateTimer = setTimeout(validateJson, 500);
-}});
-
-// Validate before submit
-document.getElementById('configForm').addEventListener('submit', function(e) {{
-  if (!validateJson()) {{
-    e.preventDefault();
-    alert('JSON 格式错误，请修正后再保存');
-  }}
-}});
+    var s=this.selectionStart, t=this.selectionEnd;
+    this.value = this.value.substring(0,s) + '  ' + this.value.substring(t);
+    this.selectionStart = this.selectionEnd = s + 2;
+  }});
+  var validateTimer;
+  editor.addEventListener('input', function() {{
+    clearTimeout(validateTimer);
+    validateTimer = setTimeout(validateJson, 500);
+  }});
+  document.getElementById('configForm').addEventListener('submit', function(e) {{
+    if (!validateJson()) {{ e.preventDefault(); alert('JSON 格式错误，请修正后再保存'); }}
+  }});
+}})();
 </script>'''
     return html_page('订阅模板配置', body)
 
@@ -895,13 +924,7 @@ _RULES_FLASH = {
 
 def render_rules(host, flash=''):
     rules = load_template_rules()
-    alert = ''
-    if flash:
-        is_err = flash.startswith('err:')
-        key = flash.removeprefix('err:')
-        msg = _RULES_FLASH.get(key, key)
-        cls = 'err' if is_err else 'flash'
-        alert = f'<div class="{cls}">{html.escape(msg)}</div>'
+    alert = render_prefixed_alert(flash, _RULES_FLASH)
 
     rows = ''
     for i, rule_str in enumerate(rules):
@@ -913,33 +936,32 @@ def render_rules(host, flash=''):
         del_btn = ''
         if not is_system:
             del_btn = (
-                f'<form method="post" action="/admin/rules/delete" style="display:inline;" '
-                f'onsubmit="return confirm(\'确认删除此规则？\')">'
+                f'<form method="post" action="/admin/rules/delete" class="inline-form-row" data-action="delete-rule">'
                 f'<input type="hidden" name="index" value="{i}">'
-                f'<button class="btn" style="background:var(--danger);color:#fff;padding:4px 10px;font-size:12px;" type="submit">删除</button>'
+                f'<button class="btn danger-btn btn-sm" type="submit">删除</button>'
                 f'</form>'
             )
-        style = ' style="color:var(--muted);"' if is_system else ''
+        tr_class = ' class="system-row"' if is_system else ''
         rows += (
-            f'<tr{style}><td>{i + 1}</td><td>{html.escape(type_label)}</td>'
-            f'<td style="word-break:break-all;">{html.escape(val)}</td>'
+            f'<tr{tr_class}><td>{i + 1}</td><td>{html.escape(type_label)}</td>'
+            f'<td class="break">{html.escape(val)}</td>'
             f'<td>{html.escape(action_label)}{extra_tag}</td>'
             f'<td>{del_btn}</td></tr>'
         )
 
     rules_text = html.escape('\n'.join(rules))
 
-    body = f'''<div class="wrap"><div class="nav"><div class="brand">订阅路由规则</div><span class="badge">{len(rules)} 条</span></div>
+    body = f'''<div class="wrap">{render_nav('订阅路由规则', f'{len(rules)} 条')}
 {alert}
-<div class="card" style="overflow:auto;">
-<div class="small" style="margin-bottom:10px;">自定义规则优先级高于规则集，从上到下依次匹配。灰色行为内置规则集，不可删除。</div>
+<div class="card scroll-x">
+<div class="small mb-sm">自定义规则优先级高于规则集，从上到下依次匹配。灰色行为内置规则集，不可删除。</div>
 <table class="table"><thead><tr><th>#</th><th>类型</th><th>匹配</th><th>动作</th><th>操作</th></tr></thead>
 <tbody>{rows}</tbody></table></div>
 
-<div class="card" style="margin-top:14px;">
-<div style="font-weight:600;margin-bottom:12px;">添加自定义规则</div>
+<div class="card mt-md">
+<div class="bold mb-md">添加自定义规则</div>
 <form method="post" action="/admin/rules/add" class="inline-form">
-<div class="grid grid-2" style="gap:10px;">
+<div class="grid grid-2">
 <div><label>规则类型</label><select name="rule_type">
 <option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX（域名后缀）</option>
 <option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD（域名关键词）</option>
@@ -957,25 +979,33 @@ def render_rules(host, flash=''):
 <option value="no-resolve">no-resolve（IP 规则跳过 DNS 解析）</option>
 </select></div>
 </div>
-<div class="row" style="margin-top:10px;">
+<div class="row mt-sm">
 <button class="btn" type="submit">添加规则（插入到最前）</button>
-<a class="btn secondary" href="/admin">返回管理后台</a>
+{back_to_admin()}
 </div>
 </form>
 </div>
 
-<div class="card" style="margin-top:14px;">
+<div class="card mt-md">
 <details>
-<summary style="font-size:14px;color:var(--accent-2);cursor:pointer;">直接编辑全部规则</summary>
-<form method="post" action="/admin/rules/raw" class="inline-form" style="margin-top:12px;">
-<div class="small" style="margin-bottom:8px;">每行一条规则，格式：<code>TYPE,匹配值,动作</code>。保存后同步到所有订阅模板。</div>
-<textarea name="rules_raw" style="width:100%;min-height:360px;padding:10px;border-radius:10px;border:1px solid var(--line);background:#0e1628;color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.6;resize:vertical;">{rules_text}</textarea>
-<div class="row" style="margin-top:10px;">
+<summary>直接编辑全部规则</summary>
+<form method="post" action="/admin/rules/raw" class="inline-form mt-md">
+<div class="small mb-sm">每行一条规则，格式：<code>TYPE,匹配值,动作</code>。保存后同步到所有订阅模板。</div>
+<textarea name="rules_raw" class="code-area code-med">{rules_text}</textarea>
+<div class="row mt-sm">
 <button class="btn" type="submit">保存全部规则</button>
 </div>
 </form>
 </details>
 </div>
+<script>
+document.addEventListener('submit', function(ev){{
+  var f = ev.target;
+  if (f && f.tagName==='FORM' && f.dataset.action==='delete-rule') {{
+    if (!confirm('确认删除此规则？')) ev.preventDefault();
+  }}
+}});
+</script>
 </div>'''
     return html_page('订阅路由规则', body)
 
@@ -1046,14 +1076,20 @@ class Handler(BaseHTTPRequestHandler):
         base_url = safe_base_url(host, self.headers.get('X-Forwarded-Proto', 'http'))
 
         if path == '/static/style.css':
-            css = BASE_CSS.encode('utf-8')
+            if self.headers.get('If-None-Match') == BASE_CSS_ETAG:
+                self.send_response(304)
+                self.send_header('ETag', BASE_CSS_ETAG)
+                self.send_header('Cache-Control', 'public, max-age=86400')
+                self.end_headers()
+                return
             self.send_response(200)
             self.send_header('Content-Type', 'text/css; charset=utf-8')
-            self.send_header('Content-Length', str(len(css)))
+            self.send_header('Content-Length', str(len(BASE_CSS_BYTES)))
             self.send_header('Cache-Control', 'public, max-age=86400')
+            self.send_header('ETag', BASE_CSS_ETAG)
             self.end_headers()
             if send_payload:
-                self.wfile.write(css)
+                self.wfile.write(BASE_CSS_BYTES)
             return
 
         if path == '/':
@@ -1115,9 +1151,9 @@ class Handler(BaseHTTPRequestHandler):
             if not is_logged_in(self):
                 self.send_response_body(403, '{"error":"unauthorized"}', 'application/json; charset=utf-8', send_payload)
                 return
-            users = load_json(USERS_FILE, {})
-            online = load_json(ONLINE_FILE, {})
-            usage_month = load_json(USAGE_FILE, {}).get(month_key(), {})
+            users = load_json_cached(USERS_FILE, {})
+            online = load_json_cached(ONLINE_FILE, {})
+            usage_month = load_json_cached(USAGE_FILE, {}).get(month_key(), {})
             user_list = []
             total_used = 0
             for u, cfg in users.items():
