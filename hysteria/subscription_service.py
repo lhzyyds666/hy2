@@ -33,6 +33,8 @@ XRAY_CONFIG_FILE = Path('/usr/local/etc/xray/config.json')
 XRAY_INBOUND_PORTS = (443, 8443)
 XRAY_BACKUP_SUFFIX = '-backup'
 
+DISPLAY_MULTIPLIER = 2.28
+
 
 def _xray_email_for(port, username):
     return username if port == 443 else f'{username}{XRAY_BACKUP_SUFFIX}'
@@ -590,6 +592,12 @@ def usage_for_user(username, usage_month=None):
     return 0, total, total
 
 
+def scaled_usage_for_user(username, usage_month=None):
+    tx, rx, total = usage_for_user(username, usage_month)
+    m = DISPLAY_MULTIPLIER
+    return int(tx * m), int(rx * m), int(total * m)
+
+
 def user_total_quota(user_cfg):
     return int(user_cfg.get('monthly_quota_bytes', 0) or 0)
 
@@ -893,7 +901,7 @@ def render_login(host, msg=''):
 
 
 def render_user_panel(host, base_url, user, token, cfg):
-    tx, rx, used = usage_for_user(user)
+    tx, rx, used = scaled_usage_for_user(user)
     total = user_total_quota(cfg)
     remain = max(total - used, 0) if total > 0 else -1
     online = int(load_json(ONLINE_FILE, {}).get(user, 0))
@@ -965,7 +973,7 @@ document.getElementById('copy-sub-btn').addEventListener('click', function() {{
 
 
 def row_form(user, cfg, online, host, base_url, usage_month=None):
-    tx, rx, used = usage_for_user(user, usage_month)
+    tx, rx, used = scaled_usage_for_user(user, usage_month)
     total = user_total_quota(cfg)
     max_devices = int(cfg.get('max_devices', 0) or 0)
     quota_gb = int(round(total / 1024 / 1024 / 1024)) if total > 0 else 0
@@ -1029,7 +1037,7 @@ def render_admin(host, base_url, flash=''):
     users = load_json(USERS_FILE, {})
     online = load_json(ONLINE_FILE, {})
     usage_month = load_json(USAGE_FILE, {}).get(month_key(), {})
-    total_used = sum(usage_for_user(u, usage_month)[2] for u in users)
+    total_used = sum(scaled_usage_for_user(u, usage_month)[2] for u in users)
     alert = render_alert(flash_text(flash))
     rows = ''.join(row_form(u, cfg, online, host, base_url, usage_month) for u, cfg in users.items()) \
         or '<tr><td colspan="4" class="empty">暂无用户，使用下方表单创建第一个用户</td></tr>'
@@ -1549,7 +1557,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response_body(403, '无权限访问', send_body=send_payload)
                 return
             yml = build_yaml(user, str(cfg.get('sub_token') or ''))
-            tx, rx, used = usage_for_user(user)
+            tx, rx, used = scaled_usage_for_user(user)
             total = user_total_quota(cfg)
             payload = yml.encode('utf-8')
             self.send_response(200)
@@ -1592,7 +1600,7 @@ class Handler(BaseHTTPRequestHandler):
             user_list = []
             total_used = 0
             for u, cfg in users.items():
-                tx, rx, used = usage_for_user(u, usage_month)
+                tx, rx, used = scaled_usage_for_user(u, usage_month)
                 total = user_total_quota(cfg)
                 total_used += used
                 user_list.append({

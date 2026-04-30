@@ -6,6 +6,7 @@ import subprocess
 import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from display import DISPLAY_MULTIPLIER
 
 XRAY_BIN = "/usr/local/bin/xray"
 XRAY_API = "127.0.0.1:10085"
@@ -205,7 +206,7 @@ def main():
         if quota <= 0:
             continue
         used = normalize_usage_entry(usage[month_key].get(uid, 0))["total"]
-        if used >= quota and int(online.get(uid, 0)) > 0:
+        if used * DISPLAY_MULTIPLIER >= quota and int(online.get(uid, 0)) > 0:
             to_kick.append(uid)
 
     if to_kick:
