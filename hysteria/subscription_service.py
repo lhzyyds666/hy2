@@ -133,8 +133,8 @@ BASE_CSS = """:root {
   --line: #1f2c4a;
   --line-strong: #2a3a5e;
   --text: #e6ecf9;
-  --text-muted: #94a3c4;
-  --text-faint: #5c6c8e;
+  --text-muted: #a3b1d1;
+  --text-faint: #7a8aae;
   --accent: #4ade80;
   --accent-2: #22c55e;
   --accent-glow: rgba(74,222,128,0.18);
@@ -159,7 +159,7 @@ BASE_CSS = """:root {
 html, body { height: 100%; }
 body {
   margin: 0;
-  font-family: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, ui-sans-serif, Helvetica, Arial, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   color: var(--text);
@@ -221,6 +221,8 @@ a:hover { color: var(--accent); }
   background: linear-gradient(90deg, var(--accent-glow), transparent);
   color: var(--text); box-shadow: inset 3px 0 0 var(--accent);
 }
+/* default size for the 24×24 stroke-icons used inline (buttons, links, summaries) */
+svg[viewBox="0 0 24 24"] { width: 16px; height: 16px; flex: 0 0 auto; }
 .sidebar-link svg { width: 18px; height: 18px; flex: 0 0 auto; opacity: 0.85; }
 .sidebar-footer { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 8px; }
 
@@ -430,10 +432,70 @@ details.summary-muted > summary { color: var(--text-muted); font-size: 13.5px; }
 /* hover-copy mono cell */
 .copy-mono { display: flex; align-items: center; gap: 8px; }
 .copy-mono code { flex: 1; min-width: 0; }
+.btn.copied, .btn.ghost.copied { background: var(--accent-glow); color: var(--accent); }
+.btn.ghost.btn-sm svg { width: 14px; height: 14px; }
+.copy-link { padding: 6px 8px; }
+.link-cell { min-width: 130px; }
+.link-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.link-row + .link-row { margin-top: 4px; }
+.link-row > a { display: inline-flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 4px 0; color: var(--info); }
+.link-row > a:hover { color: var(--accent); }
+
+/* ── Reusable logo / avatar tile ──────────────────────────────── */
+.app-logo {
+  display: grid; place-items: center; flex: 0 0 auto;
+  width: 30px; height: 30px; border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--info) 100%);
+  color: #062219; font-weight: 800; font-size: 15px;
+  box-shadow: 0 6px 16px var(--accent-glow);
+}
+.app-logo.lg { width: 40px; height: 40px; border-radius: 11px; font-size: 18px; }
+.app-logo.sm { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; box-shadow: none; }
+
+/* user-card avatar inside admin table rows (no glow) */
+.user-avatar { width: 32px; height: 32px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), var(--info));
+  display: grid; place-items: center; color: #062219; font-weight: 700; font-size: 13px; flex: 0 0 auto; }
+
+/* visible focus ring for keyboard users */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px;
+}
+
+/* ── Auth pages (home / login) ────────────────────────────────── */
+.auth-card { padding: 28px; }
+.auth-card .auth-head { display: flex; align-items: center; gap: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+.auth-card .auth-head .title { font-weight: 700; font-size: 18px; line-height: 1.25; }
+.auth-card .auth-head .sub { color: var(--text-muted); font-size: 12.5px; margin-top: 2px; }
+.auth-card form { margin: 0; }
+.btn.full { width: 100%; justify-content: center; }
+
+/* ── Inline summary preview (collapsed details) ───────────────── */
+.summary-preview { color: var(--text-muted); font-size: 12.5px; margin-left: 8px; font-weight: 400; }
+
+/* ── Guest badge ──────────────────────────────────────────────── */
+.badge.badge-info { background: rgba(96,165,250,.12); border-color: rgba(96,165,250,.4); color: #bfdbfe; font-size: 11px; padding: 2px 8px; }
+
+/* ── Card section header (used in table cards) ────────────────── */
+.card-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); gap: 10px; flex-wrap: wrap; }
+.card-flush { padding: 0; overflow: hidden; }
 
 @media (max-width: 980px) {
-  .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
-  .stat .v.big { font-size: 26px; }
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-2 { grid-template-columns: 1fr; }
+  .stat .v.big { font-size: 24px; }
+  .stat .v { font-size: 19px; }
+}
+@media (max-width: 880px) {
+  /* keep wide tables readable: force horizontal scroll instead of word-wrap squish */
+  .scroll-x .table { min-width: 720px; }
+  .table th, .table td { padding: 10px 12px; }
+}
+@media (max-width: 560px) {
+  .grid-4 { grid-template-columns: 1fr; }
+  .wrap { padding: 0 14px; margin: 18px auto; }
+  .wrap.home-wrap { margin-top: 56px; }
 }
 """
 
@@ -743,9 +805,6 @@ def html_page(title, body, body_class=''):
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<meta name="color-scheme" content="dark">'
         f'<title>{html.escape(title)}</title>'
-        f'<link rel="preconnect" href="https://fonts.googleapis.com">'
-        f'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-        f'<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">'
         f'<link rel="stylesheet" href="/static/style.css">'
         f'</head><body{cls}>{body}</body></html>'
     )
@@ -875,10 +934,15 @@ def flash_text(msg):
 
 def render_home(host):
     body = f'''<div class="wrap home-wrap">
-<div class="card elev inline-form" style="text-align:center;padding:32px 28px;">
-<div class="sidebar-brand" style="justify-content:center;padding:0 0 18px;font-size:20px;"><span class="logo">H</span><span>Hysteria</span></div>
-<div class="muted mb-md">管理与订阅控制台</div>
-<a class="btn" href="/login" style="width:100%;justify-content:center;">{icon("logout")}<span>管理员登录</span></a>
+<div class="card elev inline-form auth-card" style="text-align:center;">
+  <div class="auth-head" style="justify-content:center;border-bottom:0;padding-bottom:6px;margin-bottom:8px;">
+    <span class="app-logo lg">H</span>
+    <div style="text-align:left;">
+      <div class="title">Hysteria</div>
+      <div class="sub">管理与订阅控制台</div>
+    </div>
+  </div>
+  <a class="btn full mt-md" href="/login">{icon("logout")}<span>管理员登录</span></a>
 </div></div>'''
     return html_page('Hysteria', body)
 
@@ -886,17 +950,23 @@ def render_home(host):
 def render_login(host, msg=''):
     body = f'''<div class="wrap home-wrap">
 {render_alert(msg, 'err')}
-<div class="card elev inline-form" style="padding:28px;">
-<div class="sidebar-brand" style="padding:0 0 16px;font-size:18px;"><span class="logo">H</span><span>管理员登录</span></div>
-<div class="small mb-md">登录到 <code>{html.escape(host)}</code></div>
-<form method="post" action="/login">
-<label>用户名</label><input name="username" required autofocus>
-<label class="mt-sm">密码</label><input name="password" type="password" required>
-<div class="row mt-md">
-<button class="btn" type="submit" style="flex:1;justify-content:center;">登录</button>
-<a class="btn secondary" href="/">返回</a>
-</div>
-</form></div></div>'''
+<div class="card elev inline-form auth-card">
+  <div class="auth-head">
+    <span class="app-logo">H</span>
+    <div>
+      <div class="title">管理员登录</div>
+      <div class="sub">登录到 <code style="padding:2px 6px;font-size:11.5px;">{html.escape(host)}</code></div>
+    </div>
+  </div>
+  <form method="post" action="/login">
+    <label>用户名</label><input name="username" required autofocus autocomplete="username">
+    <label class="mt-sm">密码</label><input name="password" type="password" required autocomplete="current-password">
+    <div class="row mt-md">
+      <button class="btn" type="submit" style="flex:1;justify-content:center;">登录</button>
+      <a class="btn secondary" href="/">返回</a>
+    </div>
+  </form>
+</div></div>'''
     return html_page('管理员登录', body)
 
 
@@ -915,7 +985,7 @@ def render_user_panel(host, base_url, user, token, cfg):
     body = f'''<div class="wrap">
 <div class="nav">
   <div class="row gap-sm">
-    <span class="logo" style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--info));color:#062219;font-weight:800;">H</span>
+    <span class="app-logo">H</span>
     <div>
       <div class="brand" style="font-size:16px;">用户面板</div>
       <div class="small">{html.escape(user)}</div>
@@ -984,11 +1054,13 @@ def row_form(user, cfg, online, host, base_url, usage_month=None):
     bar_cls = 'danger' if percent >= 90 else ''
     bar_w = f'{percent:.1f}'
     user_esc = html.escape(user)
-    guest_badge = '<span class="badge" style="background:rgba(96,165,250,.12);border-color:rgba(96,165,250,.4);color:#bfdbfe;font-size:11px;padding:2px 8px;">访客</span>' if cfg.get('guest') else ''
+    guest_badge = '<span class="badge badge-info">访客</span>' if cfg.get('guest') else ''
+    guest_preview = ' · 访客' if cfg.get('guest') else ''
+    summary_preview = f'<span class="summary-preview">{quota_gb or 150} GB · {max_devices or 2} 设备{guest_preview}</span>'
     return f'''<tr data-user="{user_esc}">
 <td>
   <div class="row gap-sm" style="flex-wrap:nowrap;">
-    <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--info));display:grid;place-items:center;color:#062219;font-weight:700;font-size:13px;flex:0 0 auto;">{html.escape(user[:1].upper())}</div>
+    <div class="user-avatar">{html.escape(user[:1].upper())}</div>
     <div style="min-width:0;">
       <div class="bold">{user_esc} {guest_badge}</div>
       <div class="small">在线 <span data-role="online">{online.get(user, 0)}</span> / {max_devices} 设备</div>
@@ -1005,13 +1077,13 @@ def row_form(user, cfg, online, host, base_url, usage_month=None):
 </td>
 <td>
 <details>
-<summary>编辑套餐</summary>
+<summary>编辑套餐{summary_preview}</summary>
 <form method="post" action="/admin/update" class="inline-form">
 <input type="hidden" name="user" value="{user_esc}">
 <label>兼容连接密码（可选）</label><input name="password" type="password" placeholder="留空则不修改">
 <label class="mt-sm">设备数上限</label><input name="max_devices" type="number" min="1" value="{max_devices or 2}">
 <label class="mt-sm">月流量上限 (GB)</label><input name="quota_gb" type="number" min="1" value="{quota_gb or 150}">
-<label class="switch mt-sm"><input type="checkbox" name="guest" {guest_checked}>客人用户</label>
+<label class="switch mt-sm"><input type="checkbox" name="guest" {guest_checked}>客人用户（仅做标记，不影响认证）</label>
 <button class="btn mt-md" type="submit">保存</button>
 </form>
 </details>
@@ -1026,9 +1098,15 @@ def row_form(user, cfg, online, host, base_url, usage_month=None):
   </form>
 </div>
 </td>
-<td>
-  <a href="{html.escape(panel)}" class="row gap-sm" style="margin-bottom:4px;">{icon("dashboard")}<span>面板</span></a>
-  <a href="{html.escape(sub_http)}" class="row gap-sm">{icon("open")}<span>订阅</span></a>
+<td class="link-cell">
+  <div class="link-row">
+    <a href="{html.escape(panel)}" target="_blank" rel="noopener">{icon("dashboard")}<span>面板</span></a>
+    <button type="button" class="btn ghost btn-sm copy-link" data-copy="{html.escape(panel)}" title="复制面板链接">{icon("copy")}</button>
+  </div>
+  <div class="link-row">
+    <a href="{html.escape(sub_http)}" target="_blank" rel="noopener">{icon("open")}<span>订阅</span></a>
+    <button type="button" class="btn ghost btn-sm copy-link" data-copy="{html.escape(sub_http)}" title="复制订阅链接">{icon("copy")}</button>
+  </div>
 </td>
 </tr>'''
 
@@ -1141,6 +1219,20 @@ def render_admin(host, base_url, flash=''):
     }} else if(f.dataset.action==='delete-rule'){{
       if(!confirm('确认删除此规则？')) ev.preventDefault();
     }}
+  }});
+
+  document.addEventListener('click', function(ev){{
+    var btn = ev.target.closest('.copy-link');
+    if (!btn) return;
+    ev.preventDefault();
+    var text = btn.dataset.copy || '';
+    if (!text || !navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(function() {{
+      btn.classList.add('copied');
+      var prev = btn.getAttribute('title') || '';
+      btn.setAttribute('title', '已复制 ✓');
+      setTimeout(function() {{ btn.classList.remove('copied'); btn.setAttribute('title', prev); }}, 1200);
+    }});
   }});
 }})();
 </script>'''
