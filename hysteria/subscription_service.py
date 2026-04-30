@@ -123,85 +123,316 @@ LISTEN = ('127.0.0.1', 8081)
 SESSION_TTL = 86400
 
 BASE_CSS = """:root {
-  --bg: #0b1220;
-  --panel: #111a2d;
-  --panel-soft: #17233d;
-  --text: #e8eefc;
-  --muted: #9eb0d1;
-  --accent: #52d1a6;
-  --accent-2: #4da3ff;
-  --danger: #ff6b6b;
-  --line: #253453;
+  --bg: #0a0e17;
+  --bg-elev: #0d1320;
+  --surface: #121826;
+  --surface-2: #19223a;
+  --surface-hover: #213050;
+  --line: #1f2c4a;
+  --line-strong: #2a3a5e;
+  --text: #e6ecf9;
+  --text-muted: #94a3c4;
+  --text-faint: #5c6c8e;
+  --accent: #4ade80;
+  --accent-2: #22c55e;
+  --accent-glow: rgba(74,222,128,0.18);
+  --info: #60a5fa;
+  --info-glow: rgba(96,165,250,0.18);
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --danger-strong: #ef4444;
+  --danger-glow: rgba(248,113,113,0.18);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.02) inset;
+  --shadow-md: 0 6px 20px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.02) inset;
+  --shadow-lg: 0 18px 48px rgba(0,0,0,.5);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 22px;
+  --sidebar-w: 232px;
+  --topbar-h: 64px;
+  --transition: 160ms cubic-bezier(.4,0,.2,1);
 }
 * { box-sizing: border-box; }
+html, body { height: 100%; }
 body {
   margin: 0;
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif;
-  background: radial-gradient(1200px 600px at 20% -10%, #1c2f52 0%, var(--bg) 45%), var(--bg);
+  font-family: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--text);
+  background: var(--bg);
+  background-image:
+    radial-gradient(1100px 520px at 8% -10%, rgba(74,222,128,.06), transparent 60%),
+    radial-gradient(900px 480px at 100% 0%, rgba(96,165,250,.05), transparent 55%);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-.wrap { max-width: 1140px; margin: 28px auto; padding: 0 16px; }
-.wrap.home-wrap { max-width: 480px; margin-top: 80px; }
-.brand.brand-lg { font-size: 18px; margin-bottom: 16px; }
-.nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.brand { font-weight: 700; letter-spacing: 0.5px; }
-.badge { background: var(--panel-soft); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 6px 10px; font-size: 12px; }
-.grid { display: grid; gap: 14px; }
-.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+a { color: var(--info); text-decoration: none; transition: color var(--transition); }
+a:hover { color: var(--accent); }
+::selection { background: var(--accent-glow); color: var(--text); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+/* ── Public layout ────────────────────────────────────────────── */
+.wrap { max-width: 1140px; margin: 32px auto; padding: 0 20px; }
+.wrap.home-wrap { max-width: 460px; margin-top: 96px; }
+.brand { font-weight: 700; letter-spacing: 0.2px; }
+.brand.brand-lg { font-size: 22px; margin-bottom: 18px; }
+.nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  color: var(--text-muted); border-radius: 999px;
+  padding: 5px 12px; font-size: 12px; font-weight: 500;
+}
+
+/* ── App shell (admin pages) ──────────────────────────────────── */
+.app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 100vh; }
+.sidebar {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg-elev) 100%);
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  padding: 22px 14px;
+}
+.sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 22px; font-weight: 700; font-size: 17px; letter-spacing: 0.2px; }
+.sidebar-brand .logo {
+  width: 30px; height: 30px; border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--info) 100%);
+  display: grid; place-items: center;
+  color: #062219; font-weight: 800; font-size: 15px;
+  box-shadow: 0 6px 16px var(--accent-glow);
+}
+.sidebar-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.sidebar-section { color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; padding: 14px 12px 6px; font-weight: 600; }
+.sidebar-link {
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px 12px; border-radius: var(--radius-md);
+  color: var(--text-muted); font-size: 14px; font-weight: 500;
+  transition: all var(--transition);
+}
+.sidebar-link:hover { background: var(--surface-hover); color: var(--text); }
+.sidebar-link.active {
+  background: linear-gradient(90deg, var(--accent-glow), transparent);
+  color: var(--text); box-shadow: inset 3px 0 0 var(--accent);
+}
+.sidebar-link svg { width: 18px; height: 18px; flex: 0 0 auto; opacity: 0.85; }
+.sidebar-footer { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 8px; }
+
+.main { display: flex; flex-direction: column; min-width: 0; }
+.topbar {
+  position: sticky; top: 0; z-index: 5;
+  height: var(--topbar-h);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 28px;
+  background: rgba(10,14,23,0.7);
+  backdrop-filter: saturate(150%) blur(10px);
+  -webkit-backdrop-filter: saturate(150%) blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.page-title { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: 0.2px; }
+.page-title small { display: block; color: var(--text-faint); font-size: 12px; font-weight: 400; margin-top: 2px; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.content { padding: 24px 28px 48px; max-width: 1280px; width: 100%; }
+
+/* mobile sidebar */
+.sidebar-toggle { display: none; background: transparent; border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-md); width: 36px; height: 36px; cursor: pointer; }
+.sidebar-toggle svg { width: 18px; height: 18px; }
+.scrim { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 9; }
+@media (max-width: 880px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { position: fixed; top: 0; left: 0; z-index: 10; width: 260px; transform: translateX(-100%); transition: transform var(--transition); }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar.open ~ .scrim, body.sidebar-open .scrim { display: block; }
+  .sidebar-toggle { display: inline-flex; align-items: center; justify-content: center; }
+  .topbar { padding: 0 16px; }
+  .content { padding: 16px; }
+}
+
+/* ── Grid + cards ─────────────────────────────────────────────── */
+.grid { display: grid; gap: 16px; }
 .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.card { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.0)), var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
-.k { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
-.v { font-size: 22px; font-weight: 700; }
-.big { font-size: 30px; }
-.bar { height: 12px; border-radius: 999px; background: #0e1628; border: 1px solid var(--line); overflow: hidden; }
-.fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
-.fill.danger { background: linear-gradient(90deg, #ff8a66, var(--danger)); }
-.mini-bar { height: 5px; border-radius: 999px; background: #0e1628; overflow: hidden; margin: 5px 0 3px; }
-.mini-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
-.mini-fill.danger { background: linear-gradient(90deg, #ff8a66, var(--danger)); }
-code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; background: #0e1628; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; word-break: break-all; }
-.btn { display: inline-block; margin-top: 10px; background: var(--accent); color: #062219; border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; font-weight: 700; text-decoration: none; }
-.btn.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
-.btn.danger-btn { background: var(--danger); color: #fff; }
-.btn.btn-sm { padding: 4px 10px; font-size: 12px; }
-.table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.table th, .table td { border-bottom: 1px solid var(--line); padding: 10px 8px; text-align: left; vertical-align: top; }
-.table th { color: var(--muted); font-weight: 600; }
-.small { color: var(--muted); font-size: 12px; }
-.hero { font-size: 32px; margin: 8px 0 8px; }
-.inline-form input, .inline-form select { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: #0e1628; color: var(--text); }
-.inline-form label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 13px; }
-.row { display: flex; gap: 10px; flex-wrap: wrap; }
-.mt-sm { margin-top: 6px; }
-.mt-md { margin-top: 14px; }
-.scroll-x { overflow: auto; }
-.center-narrow { max-width: 520px; margin: 0 auto; }
-.system-row { color: var(--muted); }
-.bold { font-weight: 600; }
-.muted { color: var(--muted); }
-.break { word-break: break-all; }
-.inline-form-row { display: inline; }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,0)) , var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius-lg);
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition), transform var(--transition);
+}
+.card.elev { box-shadow: var(--shadow-md); }
+.card.hover:hover { border-color: var(--line-strong); }
+
+/* stat card */
+.stat { display: flex; flex-direction: column; gap: 6px; }
+.stat .k { color: var(--text-muted); font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat .v { color: var(--text); font-size: 22px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.stat .v.big { font-size: 30px; }
+.stat .accent-bar { height: 3px; width: 36px; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--info)); margin-top: 6px; }
+
+.k { color: var(--text-muted); font-size: 12px; font-weight: 500; margin-bottom: 6px; }
+.v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.big { font-size: 28px; }
+
+/* ── Progress bars ────────────────────────────────────────────── */
+.bar { height: 10px; border-radius: 999px; background: var(--bg-elev); border: 1px solid var(--line); overflow: hidden; position: relative; }
+.fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--info)); transition: width 600ms cubic-bezier(.2,.8,.2,1); position: relative; }
+.fill::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,0)); }
+.fill.danger { background: linear-gradient(90deg, #fb923c, var(--danger)); }
+.mini-bar { height: 5px; border-radius: 999px; background: var(--bg-elev); overflow: hidden; margin: 6px 0 4px; }
+.mini-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--info)); transition: width 600ms cubic-bezier(.2,.8,.2,1); }
+.mini-fill.danger { background: linear-gradient(90deg, #fb923c, var(--danger)); }
+
+/* ── Code/mono ────────────────────────────────────────────────── */
+code, .mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 8px 11px;
+  word-break: break-all; font-size: 12.5px;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: #062219; border: 0;
+  border-radius: var(--radius-md);
+  padding: 9px 16px; cursor: pointer;
+  font-weight: 600; font-size: 13.5px; letter-spacing: 0.2px;
+  text-decoration: none; line-height: 1;
+  box-shadow: 0 4px 14px var(--accent-glow), 0 1px 0 rgba(255,255,255,.15) inset;
+  transition: transform var(--transition), box-shadow var(--transition), filter var(--transition);
+}
+.btn:hover { transform: translateY(-1px); box-shadow: 0 8px 20px var(--accent-glow), 0 1px 0 rgba(255,255,255,.18) inset; filter: brightness(1.05); }
+.btn:active { transform: translateY(0); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.secondary {
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--line); box-shadow: var(--shadow-sm);
+}
+.btn.secondary:hover { background: var(--surface-hover); border-color: var(--line-strong); color: var(--text); }
+.btn.ghost { background: transparent; color: var(--text-muted); border: 1px solid transparent; box-shadow: none; }
+.btn.ghost:hover { background: var(--surface-hover); color: var(--text); }
+.btn.danger-btn {
+  background: linear-gradient(180deg, var(--danger) 0%, var(--danger-strong) 100%);
+  color: #fff; box-shadow: 0 4px 14px var(--danger-glow), 0 1px 0 rgba(255,255,255,.15) inset;
+}
+.btn.danger-btn:hover { box-shadow: 0 8px 20px var(--danger-glow), 0 1px 0 rgba(255,255,255,.18) inset; }
+.btn.btn-sm { padding: 5px 10px; font-size: 12px; border-radius: var(--radius-sm); }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ── Forms ────────────────────────────────────────────────────── */
+.inline-form input, .inline-form select, .inline-form textarea {
+  width: 100%; padding: 10px 12px;
+  border-radius: var(--radius-md); border: 1px solid var(--line);
+  background: var(--bg-elev); color: var(--text);
+  font: inherit; font-size: 13.5px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.inline-form input:focus, .inline-form select:focus, .inline-form textarea:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.inline-form input::placeholder { color: var(--text-faint); }
+.inline-form label { display: block; margin-bottom: 6px; color: var(--text-muted); font-size: 12.5px; font-weight: 500; }
+label.switch { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; cursor: pointer; }
+label.switch input { width: auto; accent-color: var(--accent); }
+
+/* ── Table ────────────────────────────────────────────────────── */
+.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.table th, .table td { padding: 12px 14px; text-align: left; vertical-align: top; }
+.table thead th {
+  color: var(--text-muted); font-weight: 600; font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: 0.6px;
+  border-bottom: 1px solid var(--line); background: var(--surface-2);
+}
+.table tbody tr { border-bottom: 1px solid var(--line); transition: background-color var(--transition); }
+.table tbody tr:hover { background: rgba(255,255,255,.015); }
+.table tbody tr:last-child { border-bottom: 0; }
+.card .table { margin: -4px -2px; width: calc(100% + 4px); }
+
+/* ── Alerts / flash ───────────────────────────────────────────── */
+.flash, .err {
+  display: flex; align-items: flex-start; gap: 10px;
+  border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 14px;
+  font-size: 13.5px; line-height: 1.45;
+  border: 1px solid;
+}
+.flash { background: rgba(74,222,128,.08); border-color: rgba(74,222,128,.35); color: #b6f5ce; }
+.err { background: rgba(248,113,113,.08); border-color: rgba(248,113,113,.4); color: #fecaca; }
+.flash::before, .err::before { content: ''; display: block; width: 16px; height: 16px; flex: 0 0 auto; margin-top: 2px; background-position: center; background-repeat: no-repeat; background-size: contain; }
+.flash::before { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234ade80' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg>"); }
+.err::before { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f87171' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg>"); }
+@keyframes flash-fade { 0%,70%{opacity:1;visibility:visible} 99%{opacity:0;visibility:visible} 100%{opacity:0;visibility:hidden;height:0;padding:0;margin:0;border:0} }
+.flash, .err { animation: flash-fade 5s forwards; overflow: hidden; }
+
+/* ── Details/summary ──────────────────────────────────────────── */
+details > summary {
+  cursor: pointer; color: var(--info); font-size: 13px;
+  padding: 4px 0; user-select: none; list-style: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: color var(--transition);
+}
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before {
+  content: ''; width: 7px; height: 7px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg); transition: transform var(--transition);
+}
+details[open] > summary::before { transform: rotate(45deg); }
+details > summary:hover { color: var(--text); }
+details[open] > summary { margin-bottom: 12px; }
+details.summary-muted > summary { color: var(--text-muted); font-size: 13.5px; }
+
+/* ── Code editor textarea ─────────────────────────────────────── */
+.code-area {
+  width: 100%; padding: 14px;
+  border-radius: var(--radius-md); border: 1px solid var(--line);
+  background: var(--bg-elev); color: var(--text);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px; line-height: 1.55; resize: vertical; tab-size: 2;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.code-area:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.code-area.code-tall { min-height: 600px; }
+.code-area.code-med { min-height: 360px; line-height: 1.65; }
+.code-area.invalid { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-glow); }
+.json-error { display: none; color: var(--danger); font-size: 12.5px; margin-bottom: 10px; }
+.json-error.visible { display: block; }
+
+/* ── Utility ──────────────────────────────────────────────────── */
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.gap-sm { gap: 6px; }
+.mt-sm { margin-top: 8px; }
+.mt-md { margin-top: 16px; }
+.mt-lg { margin-top: 24px; }
 .mb-sm { margin-bottom: 8px; }
 .mb-md { margin-bottom: 14px; }
-.code-area { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: #0e1628; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; line-height: 1.5; resize: vertical; tab-size: 2; }
-.code-area.code-tall { min-height: 600px; }
-.code-area.code-med { min-height: 360px; line-height: 1.6; }
-.json-error { display: none; color: var(--danger); font-size: 13px; margin-bottom: 8px; }
-.json-error.visible { display: block; }
-.code-area.invalid { border-color: var(--danger); }
-label.switch { display: inline-flex; align-items: center; gap: 6px; }
-.flash { background: #143124; border: 1px solid #2a6a50; color: #98f2ca; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
-.err { background: #3a1d23; border: 1px solid #7f2f3b; color: #ffb3c0; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
-details > summary { cursor: pointer; color: var(--accent-2); font-size: 13px; padding: 4px 0; user-select: none; list-style: none; }
-details > summary::before { content: '▶ '; font-size: 10px; }
-details[open] > summary::before { content: '▼ '; }
-details > summary:hover { color: var(--text); }
-details[open] > summary { margin-bottom: 10px; }
-details.summary-muted > summary { color: var(--muted); font-size: 14px; }
-@keyframes flash-fade { 0%,70%{opacity:1;visibility:visible} 99%{opacity:0;visibility:visible} 100%{opacity:0;visibility:hidden;height:0;padding:0;margin:0;border:0} }
-.flash, .err { animation: flash-fade 4s forwards; overflow: hidden; }
-@media (max-width: 980px) { .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; } .hero { font-size: 26px; } }
+.scroll-x { overflow-x: auto; }
+.center-narrow { max-width: 480px; margin: 0 auto; }
+.system-row { color: var(--text-faint); }
+.system-row td { color: var(--text-faint); }
+.bold { font-weight: 600; }
+.muted { color: var(--text-muted); }
+.faint { color: var(--text-faint); }
+.break { word-break: break-all; }
+.small { color: var(--text-muted); font-size: 12px; }
+.inline-form-row { display: inline; }
+.empty { color: var(--text-faint); text-align: center; padding: 20px; font-style: italic; }
+
+/* hover-copy mono cell */
+.copy-mono { display: flex; align-items: center; gap: 8px; }
+.copy-mono code { flex: 1; min-width: 0; }
+
+@media (max-width: 980px) {
+  .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+  .stat .v.big { font-size: 26px; }
+}
 """
 
 BASE_CSS_BYTES = BASE_CSS.encode('utf-8')
@@ -497,14 +728,37 @@ def is_logged_in(handler):
     return sid in sessions
 
 
-def html_page(title, body):
+def html_page(title, body, body_class=''):
+    cls = f' class="{body_class}"' if body_class else ''
     return (
-        f'<!doctype html><html><head><meta charset="utf-8">'
+        f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<meta name="color-scheme" content="dark">'
         f'<title>{html.escape(title)}</title>'
+        f'<link rel="preconnect" href="https://fonts.googleapis.com">'
+        f'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        f'<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">'
         f'<link rel="stylesheet" href="/static/style.css">'
-        f'</head><body>{body}</body></html>'
+        f'</head><body{cls}>{body}</body></html>'
     )
+
+
+# Inline SVG icons (24×24 stroke icons, sized down via .sidebar-link svg).
+_ICONS = {
+    'dashboard': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+    'config': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
+    'rules': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+    'logs': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>',
+    'logout': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+    'menu': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
+    'copy': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+    'open': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+    'back': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>',
+}
+
+
+def icon(name):
+    return _ICONS.get(name, '')
 
 
 def render_nav(brand, badge):
@@ -531,7 +785,61 @@ def render_prefixed_alert(flash, msg_map):
 
 
 def back_to_admin(label='返回管理后台'):
-    return f'<a class="btn secondary" href="/admin">{html.escape(label)}</a>'
+    return f'<a class="btn secondary" href="/admin">{icon("back")}<span>{html.escape(label)}</span></a>'
+
+
+_SIDEBAR_NAV = [
+    ('dashboard', '/admin', '总览', 'dashboard'),
+    ('config', '/admin/config', '模板配置', 'config'),
+    ('rules', '/admin/rules', '路由规则', 'rules'),
+    ('logs', '/admin/logs', '清零日志', 'logs'),
+]
+
+
+def render_admin_shell(active, page_title, content, *, badge='', subtitle='', topbar_extra=''):
+    """Wrap admin page content in the sidebar + topbar app shell."""
+    nav_items = ''.join(
+        f'<a href="{href}" class="sidebar-link {"active" if key == active else ""}">'
+        f'{icon(icon_name)}<span>{html.escape(label)}</span></a>'
+        for key, href, label, icon_name in _SIDEBAR_NAV
+    )
+    badge_html = f'<span class="badge">{html.escape(badge)}</span>' if badge else ''
+    sub_html = f'<small>{html.escape(subtitle)}</small>' if subtitle else ''
+    body = f'''<div class="app">
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand"><span class="logo">H</span><span>Hysteria</span></div>
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">管理</div>
+    {nav_items}
+  </nav>
+  <div class="sidebar-footer">
+    <a href="/logout" class="sidebar-link">{icon("logout")}<span>退出登录</span></a>
+  </div>
+</aside>
+<div class="scrim" id="scrim"></div>
+<div class="main">
+  <header class="topbar">
+    <div class="row gap-sm">
+      <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="切换侧边栏">{icon("menu")}</button>
+      <h1 class="page-title">{html.escape(page_title)}{sub_html}</h1>
+    </div>
+    <div class="topbar-actions">{topbar_extra}{badge_html}</div>
+  </header>
+  <div class="content">{content}</div>
+</div>
+</div>
+<script>
+(function() {{
+  var sb = document.getElementById('sidebar');
+  var sc = document.getElementById('scrim');
+  var bt = document.getElementById('sidebar-toggle');
+  function close() {{ sb.classList.remove('open'); document.body.classList.remove('sidebar-open'); }}
+  bt.addEventListener('click', function() {{ sb.classList.toggle('open'); document.body.classList.toggle('sidebar-open'); }});
+  sc.addEventListener('click', close);
+  window.addEventListener('resize', function() {{ if (window.innerWidth > 880) close(); }});
+}})();
+</script>'''
+    return html_page(page_title, body, body_class='has-shell')
 
 
 def flash_text(msg):
@@ -558,22 +866,28 @@ def flash_text(msg):
 
 
 def render_home(host):
-    body = '''<div class="wrap home-wrap">
-<div class="card inline-form">
-<div class="brand brand-lg">Hysteria 管理后台</div>
-<a class="btn" href="/login">管理员登录</a>
+    body = f'''<div class="wrap home-wrap">
+<div class="card elev inline-form" style="text-align:center;padding:32px 28px;">
+<div class="sidebar-brand" style="justify-content:center;padding:0 0 18px;font-size:20px;"><span class="logo">H</span><span>Hysteria</span></div>
+<div class="muted mb-md">管理与订阅控制台</div>
+<a class="btn" href="/login" style="width:100%;justify-content:center;">{icon("logout")}<span>管理员登录</span></a>
 </div></div>'''
     return html_page('Hysteria', body)
 
 
 def render_login(host, msg=''):
-    body = f'''<div class="wrap">{render_nav('管理员登录', host)}
+    body = f'''<div class="wrap home-wrap">
 {render_alert(msg, 'err')}
-<div class="card inline-form center-narrow"><form method="post" action="/login">
-<label>用户名</label><input name="username" required>
+<div class="card elev inline-form" style="padding:28px;">
+<div class="sidebar-brand" style="padding:0 0 16px;font-size:18px;"><span class="logo">H</span><span>管理员登录</span></div>
+<div class="small mb-md">登录到 <code>{html.escape(host)}</code></div>
+<form method="post" action="/login">
+<label>用户名</label><input name="username" required autofocus>
 <label class="mt-sm">密码</label><input name="password" type="password" required>
-<button class="btn" type="submit">登录管理后台</button>
-<a class="btn secondary" href="/">返回首页</a>
+<div class="row mt-md">
+<button class="btn" type="submit" style="flex:1;justify-content:center;">登录</button>
+<a class="btn secondary" href="/">返回</a>
+</div>
 </form></div></div>'''
     return html_page('管理员登录', body)
 
@@ -589,18 +903,62 @@ def render_user_panel(host, base_url, user, token, cfg):
     panel_path = f'/panel/{user}?token={token}'
     sub_http = f'{base_url}{sub_path}'
     panel_http = f'{base_url}{panel_path}'
-    body = f'''<div class="wrap">{render_nav('用户面板', user)}
-<div class="grid grid-4"><div class="card"><div class="k">本月已用</div><div class="v big">{fmt_bytes(used)}</div></div><div class="card"><div class="k">总流量</div><div class="v">{fmt_bytes(total)}</div></div><div class="card"><div class="k">剩余流量</div><div class="v">{fmt_bytes(remain)}</div></div><div class="card"><div class="k">在线设备</div><div class="v">{online} / {int(cfg.get('max_devices', 0) or 0)}</div></div></div>
-<div class="card mt-md"><div class="k">流量进度 {percent:.2f}%</div><div class="bar"><div class="fill {cls}" style="width:{percent:.2f}%"></div></div><div class="small mt-sm">上传: {fmt_bytes(tx)} | 下载: {fmt_bytes(rx)}</div></div>
-<div class="grid grid-2 mt-md"><div class="card"><div class="k">订阅链接</div><div class="mono" id="sub">{html.escape(sub_http)}</div><div class="row"><button class="btn" id="copy-sub-btn" type="button">复制订阅链接</button><a class="btn secondary" href="{html.escape(sub_path)}">打开订阅</a></div></div><div class="card"><div class="k">当前面板链接</div><div class="mono">{html.escape(panel_http)}</div><div class="row"><a class="btn secondary" href="/">返回首页</a></div></div></div>
+    max_devices_n = int(cfg.get('max_devices', 0) or 0)
+    body = f'''<div class="wrap">
+<div class="nav">
+  <div class="row gap-sm">
+    <span class="logo" style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--info));color:#062219;font-weight:800;">H</span>
+    <div>
+      <div class="brand" style="font-size:16px;">用户面板</div>
+      <div class="small">{html.escape(user)}</div>
+    </div>
+  </div>
+  <span class="badge">{html.escape(host)}</span>
+</div>
+<div class="grid grid-4">
+  <div class="card stat"><div class="k">本月已用</div><div class="v big">{fmt_bytes(used)}</div><div class="accent-bar"></div></div>
+  <div class="card stat"><div class="k">总流量</div><div class="v">{fmt_bytes(total)}</div></div>
+  <div class="card stat"><div class="k">剩余流量</div><div class="v">{fmt_bytes(remain)}</div></div>
+  <div class="card stat"><div class="k">在线设备</div><div class="v">{online} <span class="faint" style="font-size:14px;font-weight:500;">/ {max_devices_n}</span></div></div>
+</div>
+<div class="card mt-md">
+  <div class="row" style="justify-content:space-between;margin-bottom:10px;">
+    <div class="k" style="margin:0;">流量进度</div>
+    <div class="bold" style="font-variant-numeric:tabular-nums;">{percent:.2f}%</div>
+  </div>
+  <div class="bar"><div class="fill {cls}" style="width:{percent:.2f}%"></div></div>
+  <div class="small mt-sm">上传 {fmt_bytes(tx)} · 下载 {fmt_bytes(rx)}</div>
+</div>
+<div class="grid grid-2 mt-md">
+  <div class="card">
+    <div class="k">订阅链接</div>
+    <div class="copy-mono"><code id="sub">{html.escape(sub_http)}</code></div>
+    <div class="row mt-md">
+      <button class="btn" id="copy-sub-btn" type="button">{icon("copy")}<span>复制链接</span></button>
+      <a class="btn secondary" href="{html.escape(sub_path)}">{icon("open")}<span>打开订阅</span></a>
+    </div>
+  </div>
+  <div class="card">
+    <div class="k">当前面板链接</div>
+    <div class="copy-mono"><code>{html.escape(panel_http)}</code></div>
+    <div class="row mt-md">
+      <a class="btn secondary" href="/">{icon("back")}<span>返回首页</span></a>
+    </div>
+  </div>
+</div>
 </div>
 <script>
 document.getElementById('copy-sub-btn').addEventListener('click', function() {{
+  var btn = this;
   var text = document.getElementById('sub').textContent;
   if (!navigator.clipboard) {{ alert('当前环境不支持自动复制，请手动选中链接复制'); return; }}
-  navigator.clipboard.writeText(text)
-    .then(function() {{ alert('已复制订阅链接'); }})
-    .catch(function() {{ alert('复制失败，请手动复制'); }});
+  navigator.clipboard.writeText(text).then(function() {{
+    var label = btn.querySelector('span');
+    var prev = label.textContent;
+    label.textContent = '已复制 ✓';
+    btn.disabled = true;
+    setTimeout(function() {{ label.textContent = prev; btn.disabled = false; }}, 1400);
+  }}).catch(function() {{ alert('复制失败，请手动复制'); }});
 }});
 </script>'''
     return html_page(f'{user} 用户面板', body)
@@ -618,12 +976,24 @@ def row_form(user, cfg, online, host, base_url, usage_month=None):
     bar_cls = 'danger' if percent >= 90 else ''
     bar_w = f'{percent:.1f}'
     user_esc = html.escape(user)
+    guest_badge = '<span class="badge" style="background:rgba(96,165,250,.12);border-color:rgba(96,165,250,.4);color:#bfdbfe;font-size:11px;padding:2px 8px;">访客</span>' if cfg.get('guest') else ''
     return f'''<tr data-user="{user_esc}">
-<td>{user_esc}<div class="small">在线：<span data-role="online">{online.get(user, 0)}</span> / {max_devices}</div></td>
 <td>
-  <span class="bold" data-role="used">{fmt_bytes(used)}</span><span class="small"> / {fmt_bytes(total)}</span>
+  <div class="row gap-sm" style="flex-wrap:nowrap;">
+    <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--info));display:grid;place-items:center;color:#062219;font-weight:700;font-size:13px;flex:0 0 auto;">{html.escape(user[:1].upper())}</div>
+    <div style="min-width:0;">
+      <div class="bold">{user_esc} {guest_badge}</div>
+      <div class="small">在线 <span data-role="online">{online.get(user, 0)}</span> / {max_devices} 设备</div>
+    </div>
+  </div>
+</td>
+<td>
+  <div class="row" style="justify-content:space-between;margin-bottom:4px;">
+    <span class="bold" data-role="used">{fmt_bytes(used)}</span>
+    <span class="small">/ {fmt_bytes(total)}</span>
+  </div>
   <div class="mini-bar"><div class="mini-fill {bar_cls}" data-role="bar" style="width:{bar_w}%"></div></div>
-  <div class="small" data-role="detail">{percent:.1f}% | ↑{fmt_bytes(tx)} ↓{fmt_bytes(rx)}</div>
+  <div class="small mt-sm" data-role="detail">{percent:.1f}% · ↑{fmt_bytes(tx)} ↓{fmt_bytes(rx)}</div>
 </td>
 <td>
 <details>
@@ -634,19 +1004,24 @@ def row_form(user, cfg, online, host, base_url, usage_month=None):
 <label class="mt-sm">设备数上限</label><input name="max_devices" type="number" min="1" value="{max_devices or 2}">
 <label class="mt-sm">月流量上限 (GB)</label><input name="quota_gb" type="number" min="1" value="{quota_gb or 150}">
 <label class="switch mt-sm"><input type="checkbox" name="guest" {guest_checked}>客人用户</label>
-<button class="btn" type="submit">保存</button>
+<button class="btn mt-md" type="submit">保存</button>
 </form>
 </details>
-<form method="post" action="/admin/reset-usage" class="inline-form mt-sm">
-<input type="hidden" name="user" value="{user_esc}">
-<button class="btn secondary" type="submit">清除流量</button>
-</form>
-<form method="post" action="/admin/delete" class="inline-form mt-sm" data-action="delete-user">
-<input type="hidden" name="user" value="{user_esc}">
-<button class="btn danger-btn" type="submit">删除</button>
-</form>
+<div class="row gap-sm mt-sm">
+  <form method="post" action="/admin/reset-usage" class="inline-form-row">
+    <input type="hidden" name="user" value="{user_esc}">
+    <button class="btn ghost btn-sm" type="submit">清流量</button>
+  </form>
+  <form method="post" action="/admin/delete" class="inline-form-row" data-action="delete-user">
+    <input type="hidden" name="user" value="{user_esc}">
+    <button class="btn danger-btn btn-sm" type="submit">删除</button>
+  </form>
+</div>
 </td>
-<td><a href="{html.escape(panel)}">用户面板</a><br><a href="{html.escape(sub_http)}">订阅链接</a></td>
+<td>
+  <a href="{html.escape(panel)}" class="row gap-sm" style="margin-bottom:4px;">{icon("dashboard")}<span>面板</span></a>
+  <a href="{html.escape(sub_http)}" class="row gap-sm">{icon("open")}<span>订阅</span></a>
+</td>
 </tr>'''
 
 
@@ -656,35 +1031,97 @@ def render_admin(host, base_url, flash=''):
     usage_month = load_json(USAGE_FILE, {}).get(month_key(), {})
     total_used = sum(usage_for_user(u, usage_month)[2] for u in users)
     alert = render_alert(flash_text(flash))
-    rows = ''.join(row_form(u, cfg, online, host, base_url, usage_month) for u, cfg in users.items())
-    body = f'''<div class="wrap">{render_nav('管理后台', f'{len(users)} 个用户')}
-{alert}
-<div class="grid grid-3"><div class="card"><div class="k">本月总流量</div><div class="v big" id="total-used">{fmt_bytes(total_used)}</div></div><div class="card"><div class="k">统计月份</div><div class="v">{month_key()}</div></div><div class="card"><div class="k">操作</div><form method="post" action="/admin/reset-usage-all" data-action="reset-all"><button class="btn secondary" type="submit">一键清空全部已用流量</button></form><a class="btn secondary" href="/admin/config">模板配置</a><a class="btn secondary" href="/admin/rules">路由规则</a><a class="btn secondary" href="/admin/logs">查看清零日志</a><a class="btn secondary" href="/logout">退出登录</a></div></div>
-<div class="card mt-md scroll-x"><table class="table"><thead><tr><th>用户</th><th>用量</th><th>操作</th><th>链接</th></tr></thead><tbody>{rows}</tbody></table></div>
+    rows = ''.join(row_form(u, cfg, online, host, base_url, usage_month) for u, cfg in users.items()) \
+        or '<tr><td colspan="4" class="empty">暂无用户，使用下方表单创建第一个用户</td></tr>'
+    content = f'''{alert}
+<div class="grid grid-3">
+  <div class="card stat"><div class="k">本月总流量</div><div class="v big" id="total-used">{fmt_bytes(total_used)}</div><div class="accent-bar"></div></div>
+  <div class="card stat"><div class="k">统计月份</div><div class="v">{month_key()}</div></div>
+  <div class="card stat">
+    <div class="k">快速操作</div>
+    <form method="post" action="/admin/reset-usage-all" data-action="reset-all" style="margin:6px 0 0;">
+      <button class="btn secondary btn-sm" type="submit">一键清空本月已用</button>
+    </form>
+  </div>
+</div>
+<div class="card mt-md scroll-x" style="padding:0;overflow:hidden;">
+  <div class="row" style="padding:14px 18px;justify-content:space-between;border-bottom:1px solid var(--line);">
+    <div class="bold">用户列表</div>
+    <div class="small">实时刷新 · 每 5 秒</div>
+  </div>
+  <table class="table"><thead><tr><th style="padding-left:18px;">用户</th><th>本月用量</th><th>操作</th><th style="padding-right:18px;">链接</th></tr></thead><tbody>{rows}</tbody></table>
+</div>
+<div class="card mt-md">
+  <details class="summary-muted">
+    <summary>新增用户</summary>
+    <form method="post" action="/admin/add" class="inline-form mt-md">
+      <div class="grid grid-3">
+        <div><label>用户名</label><input name="user" required></div>
+        <div><label>兼容连接密码（可选）</label><input name="password" type="password" placeholder="默认仅用订阅 token 认证"></div>
+        <div><label>月流量上限 (GB)</label><input name="quota_gb" type="number" value="150" min="1"></div>
+      </div>
+      <div class="row mt-md">
+        <label class="switch"><input type="checkbox" name="guest" checked>客人用户</label>
+        <label class="switch"><input type="checkbox" name="reset_token">已存在则重置订阅令牌</label>
+      </div>
+      <button class="btn mt-md" type="submit">创建用户</button>
+    </form>
+  </details>
+</div>
 <script>
 (function(){{
   function fmt(n){{n=Math.max(0,Number(n)||0);var u=['B','KB','MB','GB','TB'],i=0;while(n>=1024&&i<u.length-1){{n/=1024;i++;}}return n.toFixed(2)+' '+u[i];}}
   function setText(el,v){{ if(el && el.textContent!==v) el.textContent=v; }}
   function setStyle(el,prop,v){{ if(el && el.style[prop]!==v) el.style[prop]=v; }}
   function setClass(el,cls,on){{ if(el && el.classList.contains(cls)!==on) el.classList.toggle(cls,on); }}
+
+  // Build a one-shot index of rows + child cells so we don't re-query the DOM each tick.
+  var index = new Map();
+  document.querySelectorAll('tr[data-user]').forEach(function(tr) {{
+    index.set(tr.dataset.user, {{
+      tr: tr,
+      online: tr.querySelector('[data-role="online"]'),
+      used: tr.querySelector('[data-role="used"]'),
+      bar: tr.querySelector('[data-role="bar"]'),
+      detail: tr.querySelector('[data-role="detail"]'),
+      lastUsed: -1, lastOnline: -1, lastPercent: -1,
+    }});
+  }});
+  var totalEl = document.getElementById('total-used');
+  var lastTotal = -1;
+
+  var timer = null;
+  var inflight = false;
   async function tick(){{
+    if (inflight) return;
+    inflight = true;
     try{{
       var r=await fetch('/admin/usage.json',{{credentials:'same-origin',cache:'no-store'}});
       if(!r.ok) return;
       var d=await r.json();
-      setText(document.getElementById('total-used'), fmt(d.total_used));
+      if (d.total_used !== lastTotal) {{ setText(totalEl, fmt(d.total_used)); lastTotal = d.total_used; }}
       (d.users||[]).forEach(function(u){{
-        var tr=document.querySelector('tr[data-user="'+CSS.escape(u.user)+'"]');
-        if(!tr) return;
-        setText(tr.querySelector('[data-role="online"]'), String(u.online));
-        setText(tr.querySelector('[data-role="used"]'), fmt(u.used));
-        var bar=tr.querySelector('[data-role="bar"]');
-        if(bar){{ setStyle(bar,'width', u.percent.toFixed(1)+'%'); setClass(bar,'danger', u.percent>=90); }}
-        setText(tr.querySelector('[data-role="detail"]'), u.percent.toFixed(1)+'% | ↑'+fmt(u.tx)+' ↓'+fmt(u.rx));
+        var row = index.get(u.user);
+        if (!row) return;
+        if (u.online !== row.lastOnline) {{ setText(row.online, String(u.online)); row.lastOnline = u.online; }}
+        if (u.used !== row.lastUsed) {{ setText(row.used, fmt(u.used)); row.lastUsed = u.used; }}
+        if (u.percent !== row.lastPercent) {{
+          setStyle(row.bar, 'width', u.percent.toFixed(1)+'%');
+          setClass(row.bar, 'danger', u.percent >= 90);
+          setText(row.detail, u.percent.toFixed(1)+'% · ↑'+fmt(u.tx)+' ↓'+fmt(u.rx));
+          row.lastPercent = u.percent;
+        }}
       }});
-    }}catch(e){{}}
+    }} catch(e){{}} finally {{ inflight = false; }}
   }}
-  setInterval(tick, 5000);
+  function start(){{ if (!timer) {{ tick(); timer = setInterval(tick, 5000); }} }}
+  function stop(){{ if (timer) {{ clearInterval(timer); timer = null; }} }}
+  document.addEventListener('visibilitychange', function() {{
+    if (document.hidden) stop(); else start();
+  }});
+  window.addEventListener('pagehide', stop);
+  start();
+
   document.addEventListener('submit', function(ev){{
     var f=ev.target;
     if(!f || f.tagName!=='FORM') return;
@@ -698,10 +1135,10 @@ def render_admin(host, base_url, flash=''):
     }}
   }});
 }})();
-</script>
-<div class="card mt-md"><details class="summary-muted"><summary>新增用户</summary><form method="post" action="/admin/add" class="inline-form mt-md"><div class="grid grid-3"><div><label>用户名</label><input name="user" required></div><div><label>兼容连接密码（可选）</label><input name="password" type="password" placeholder="默认仅用订阅 token 认证"></div><div><label>月流量上限 (GB)</label><input name="quota_gb" type="number" value="150" min="1"></div></div><div class="row mt-sm"><label class="switch"><input type="checkbox" name="guest" checked>客人用户</label><label class="switch"><input type="checkbox" name="reset_token">若用户已存在则重置订阅令牌</label></div><button class="btn" type="submit">创建用户</button></form></details></div>
-</div>'''
-    return html_page('管理后台', body)
+</script>'''
+    return render_admin_shell('dashboard', '总览', content,
+                              badge=f'{len(users)} 个用户',
+                              subtitle=f'{host} · 计费月份 {month_key()}')
 
 
 def _action_label(action):
@@ -739,15 +1176,16 @@ def render_reset_logs(host, limit=300):
         rows.append(f'<tr><td class="small">{t}</td><td>{actor}</td><td class="small">{ip}</td>'
                     f'<td>{action}</td><td>{target}</td><td class="small">{month}</td>'
                     f'<td class="small">{html.escape(detail)}</td></tr>')
-    table = ''.join(rows) if rows else '<tr><td colspan="7" class="muted">暂无日志记录</td></tr>'
-    body = f'''<div class="wrap">{render_nav('清零日志', host)}
-<div class="card"><div class="k">展示最近 {limit} 条，最新在最上方</div>
-<div class="row">{back_to_admin()}</div></div>
-<div class="card mt-md scroll-x">
-<table class="table"><thead><tr><th>时间</th><th>操作人</th><th>IP</th><th>操作</th><th>目标</th><th>月份</th><th>流量变化</th></tr></thead>
-<tbody>{table}</tbody></table></div>
+    table = ''.join(rows) if rows else f'<tr><td colspan="7" class="empty">暂无日志记录</td></tr>'
+    content = f'''<div class="card scroll-x" style="padding:0;overflow:hidden;">
+  <div class="row" style="padding:14px 18px;justify-content:space-between;border-bottom:1px solid var(--line);">
+    <div class="bold">最近清零记录</div>
+    <div class="small">最近 {limit} 条 · 最新在上</div>
+  </div>
+  <table class="table"><thead><tr><th style="padding-left:18px;">时间</th><th>操作人</th><th>IP</th><th>操作</th><th>目标</th><th>月份</th><th style="padding-right:18px;">流量变化</th></tr></thead>
+  <tbody>{table}</tbody></table>
 </div>'''
-    return html_page('清零日志', body)
+    return render_admin_shell('logs', '清零日志', content, badge=host)
 
 
 def _load_yaml_file(path):
@@ -792,24 +1230,21 @@ def render_config_editor(host, flash=''):
         if not flash:
             alert = render_alert(f'加载配置失败: {e}', 'err')
 
-    body = f'''<div class="wrap">{render_nav('订阅模板配置', host)}
-{alert}
+    content = f'''{alert}
 <div class="card mb-md">
-<div class="small mb-sm">编辑订阅模板（JSON 格式）。保存后所有用户下次拉订阅即获得新配置，每个用户的密码和 UUID 由服务端从 users.json 自动注入。</div>
-<div class="small">模板文件：{html.escape(str(TEMPLATE_FILE))}</div>
+  <div class="small mb-sm">编辑订阅模板（JSON 格式）。保存后所有用户下次拉订阅即获得新配置，每个用户的密码和 UUID 由服务端从 users.json 自动注入。</div>
+  <div class="small">模板文件：<code>{html.escape(str(TEMPLATE_FILE))}</code></div>
 </div>
 <div class="card">
-<form method="post" action="/admin/config/save" id="configForm">
-<div id="jsonError" class="json-error"></div>
-<textarea name="config_json" id="configEditor" class="code-area code-tall" spellcheck="false">{html.escape(config_json)}</textarea>
-<div class="row mt-md">
-<button class="btn" type="submit">保存模板</button>
-<button class="btn secondary" type="button" id="cfgFormat">格式化 JSON</button>
-<button class="btn secondary" type="button" id="cfgCollapse">折叠/展开节点</button>
-{back_to_admin()}
-</div>
-</form>
-</div>
+  <form method="post" action="/admin/config/save" id="configForm">
+    <div id="jsonError" class="json-error"></div>
+    <textarea name="config_json" id="configEditor" class="code-area code-tall" spellcheck="false">{html.escape(config_json)}</textarea>
+    <div class="row mt-md">
+      <button class="btn" type="submit">保存模板</button>
+      <button class="btn secondary" type="button" id="cfgFormat">格式化 JSON</button>
+      <button class="btn ghost" type="button" id="cfgCollapse">折叠/展开</button>
+    </div>
+  </form>
 </div>
 <script>
 (function(){{
@@ -849,7 +1284,7 @@ def render_config_editor(host, flash=''):
   }});
 }})();
 </script>'''
-    return html_page('订阅模板配置', body)
+    return render_admin_shell('config', '订阅模板配置', content, badge=host)
 
 
 def load_template_rules():
@@ -951,52 +1386,53 @@ def render_rules(host, flash=''):
 
     rules_text = html.escape('\n'.join(rules))
 
-    body = f'''<div class="wrap">{render_nav('订阅路由规则', f'{len(rules)} 条')}
-{alert}
-<div class="card scroll-x">
-<div class="small mb-sm">自定义规则优先级高于规则集，从上到下依次匹配。灰色行为内置规则集，不可删除。</div>
-<table class="table"><thead><tr><th>#</th><th>类型</th><th>匹配</th><th>动作</th><th>操作</th></tr></thead>
-<tbody>{rows}</tbody></table></div>
-
-<div class="card mt-md">
-<div class="bold mb-md">添加自定义规则</div>
-<form method="post" action="/admin/rules/add" class="inline-form">
-<div class="grid grid-2">
-<div><label>规则类型</label><select name="rule_type">
-<option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX（域名后缀）</option>
-<option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD（域名关键词）</option>
-<option value="DOMAIN">DOMAIN（完整域名）</option>
-<option value="IP-CIDR">IP-CIDR（IP 段）</option>
-</select></div>
-<div><label>匹配值</label><input name="pattern" required placeholder="example.com 或 10.0.0.0/8"></div>
-<div><label>动作</label><select name="action">
-<option value="DIRECT">直连 (DIRECT)</option>
-<option value="🚀 节点选择">代理 (🚀 节点选择)</option>
-<option value="REJECT">拦截 (REJECT)</option>
-</select></div>
-<div><label>附加选项</label><select name="extra">
-<option value="">无</option>
-<option value="no-resolve">no-resolve（IP 规则跳过 DNS 解析）</option>
-</select></div>
+    content = f'''{alert}
+<div class="card mb-md">
+  <div class="small">自定义规则优先级高于规则集，从上到下依次匹配。灰色行为内置规则集，不可删除。</div>
 </div>
-<div class="row mt-sm">
-<button class="btn" type="submit">添加规则（插入到最前）</button>
-{back_to_admin()}
-</div>
-</form>
+<div class="card scroll-x" style="padding:0;overflow:hidden;">
+  <table class="table"><thead><tr><th style="padding-left:18px;width:50px;">#</th><th>类型</th><th>匹配</th><th>动作</th><th style="padding-right:18px;width:90px;">操作</th></tr></thead>
+  <tbody>{rows or '<tr><td colspan="5" class="empty">暂无规则</td></tr>'}</tbody></table>
 </div>
 
 <div class="card mt-md">
-<details>
-<summary>直接编辑全部规则</summary>
-<form method="post" action="/admin/rules/raw" class="inline-form mt-md">
-<div class="small mb-sm">每行一条规则，格式：<code>TYPE,匹配值,动作</code>。保存后同步到所有订阅模板。</div>
-<textarea name="rules_raw" class="code-area code-med">{rules_text}</textarea>
-<div class="row mt-sm">
-<button class="btn" type="submit">保存全部规则</button>
+  <div class="bold mb-md">添加自定义规则</div>
+  <form method="post" action="/admin/rules/add" class="inline-form">
+    <div class="grid grid-2">
+      <div><label>规则类型</label><select name="rule_type">
+        <option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX（域名后缀）</option>
+        <option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD（域名关键词）</option>
+        <option value="DOMAIN">DOMAIN（完整域名）</option>
+        <option value="IP-CIDR">IP-CIDR（IP 段）</option>
+      </select></div>
+      <div><label>匹配值</label><input name="pattern" required placeholder="example.com 或 10.0.0.0/8"></div>
+      <div><label>动作</label><select name="action">
+        <option value="DIRECT">直连 (DIRECT)</option>
+        <option value="🚀 节点选择">代理 (🚀 节点选择)</option>
+        <option value="REJECT">拦截 (REJECT)</option>
+      </select></div>
+      <div><label>附加选项</label><select name="extra">
+        <option value="">无</option>
+        <option value="no-resolve">no-resolve（IP 规则跳过 DNS 解析）</option>
+      </select></div>
+    </div>
+    <div class="row mt-md">
+      <button class="btn" type="submit">添加规则（插入到最前）</button>
+    </div>
+  </form>
 </div>
-</form>
-</details>
+
+<div class="card mt-md">
+  <details>
+    <summary>直接编辑全部规则</summary>
+    <form method="post" action="/admin/rules/raw" class="inline-form mt-md">
+      <div class="small mb-sm">每行一条规则，格式：<code>TYPE,匹配值,动作</code>。保存后同步到所有订阅模板。</div>
+      <textarea name="rules_raw" class="code-area code-med">{rules_text}</textarea>
+      <div class="row mt-md">
+        <button class="btn" type="submit">保存全部规则</button>
+      </div>
+    </form>
+  </details>
 </div>
 <script>
 document.addEventListener('submit', function(ev){{
@@ -1005,9 +1441,8 @@ document.addEventListener('submit', function(ev){{
     if (!confirm('确认删除此规则？')) ev.preventDefault();
   }}
 }});
-</script>
-</div>'''
-    return html_page('订阅路由规则', body)
+</script>'''
+    return render_admin_shell('rules', '订阅路由规则', content, badge=f'{len(rules)} 条')
 
 
 class Handler(BaseHTTPRequestHandler):
