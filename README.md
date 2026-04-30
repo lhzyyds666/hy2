@@ -129,6 +129,8 @@ These are per-server secrets or runtime state — never commit them. They are al
 - Per-user `sub_token` is a 24-byte URL-safe random; rotating it instantly invalidates a leaked subscription URL without affecting the user record.
 - Set up a real TLS cert (e.g. `certbot --nginx`) before exposing this on the public internet — the bundled cert is self-signed for the Hysteria endpoint only.
 
+> **Rotation log** — an early commit (pre-`e7d9d3a`) accidentally embedded a real `HY_API_SECRET` in source. It was rotated and verified invalid on 2026-04-30; the value present in pre-`e7d9d3a` git history no longer authenticates against any live endpoint.
+
 ## Project layout
 
 ```
