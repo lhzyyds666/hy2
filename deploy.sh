@@ -77,6 +77,8 @@ render "$REPO_DIR/hysteria/config.yaml.tpl"          "$HY_DIR/config.yaml"
 render "$REPO_DIR/hysteria/auth_backend.py"          "$HY_DIR/auth_backend.py"
 render "$REPO_DIR/hysteria/subscription_service.py"  "$HY_DIR/subscription_service.py"
 render "$REPO_DIR/hysteria/traffic_limiter.py"       "$HY_DIR/traffic_limiter.py"
+render "$REPO_DIR/hysteria/alerts.py"                "$HY_DIR/alerts.py"
+render "$REPO_DIR/hysteria/anomaly.py"               "$HY_DIR/anomaly.py"
 chmod 700 "$HY_DIR"/*.py
 chmod 600 "$HY_DIR/config.yaml"
 

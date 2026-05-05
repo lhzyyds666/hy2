@@ -149,6 +149,25 @@ These are per-server secrets or runtime state — never commit them. They are al
 └── systemd/                        # unit files for every service
 ```
 
+## Alerts (optional)
+
+Drop a `/root/hysteria/alerts.json` (chmod 600) to enable Telegram / webhook alerts:
+
+```json
+{
+  "telegram": {"bot_token": "...", "chat_id": "..."},
+  "webhook":  {"url": "https://example.com/hook", "secret": "optional-hmac-key"},
+  "anomaly_z_threshold": 3.0,
+  "anomaly_min_bytes": 1073741824
+}
+```
+
+- 80% / 100% quota crossings → one push per user per billing month
+- Daily total exceeding `z_threshold` σ above the trailing 7-day mean → one push per user per day
+- Webhook payloads are HMAC-SHA256 signed via `X-Hy2-Signature: sha256=<hex>` when `secret` is set
+
+If the file is absent, the dispatcher is a no-op. Live infra heartbeat at `/admin/health` (6 cards: cron pulse / hysteria / xray / disk / TLS cert / online users, auto-refreshes every 30s).
+
 ## License
 
 MIT — see `LICENSE` if present, otherwise treat as MIT.

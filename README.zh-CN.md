@@ -149,6 +149,25 @@ sudo ./deploy.sh
 └── systemd/                        # 各服务 unit 文件
 ```
 
+## 告警（可选）
+
+放一份 `/root/hysteria/alerts.json`（chmod 600）开启 Telegram / webhook 告警：
+
+```json
+{
+  "telegram": {"bot_token": "...", "chat_id": "..."},
+  "webhook":  {"url": "https://example.com/hook", "secret": "可选-hmac-key"},
+  "anomaly_z_threshold": 3.0,
+  "anomaly_min_bytes": 1073741824
+}
+```
+
+- 配额跨过 80% / 100% → 每用户每月一次推送
+- 当日相对最近 7 日均值 z-score > 阈值 → 每用户每日一次推送
+- webhook 带 `secret` 时附 `X-Hy2-Signature: sha256=<hmac>` 头
+
+文件不存在时告警通道静默关闭。基础设施健康状态见 `/admin/health`（cron 心跳 / hysteria / xray / 磁盘 / TLS 证书 / 在线用户 6 张卡，30 秒自动刷新）。
+
 ## 许可
 
 MIT —— 详见 `LICENSE`，若无文件则默认 MIT。
