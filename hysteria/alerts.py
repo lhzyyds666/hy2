@@ -123,12 +123,15 @@ def _post_webhook(cfg, event, *, opener):
 
 def dispatch(event, *, config=None, opener=None):
     """Fire `event` to every configured channel. Never raises."""
-    cfg = config if config is not None else load_config()
-    if not cfg:
-        return
-    transport = opener if opener is not None else urllib.request
-    msg = format_message(event)
-    if cfg.get('telegram'):
-        _post_telegram(cfg['telegram'], msg, opener=transport)
-    if cfg.get('webhook'):
-        _post_webhook(cfg['webhook'], event, opener=transport)
+    try:
+        cfg = config if config is not None else load_config()
+        if not isinstance(cfg, dict):
+            return
+        transport = opener if opener is not None else urllib.request
+        msg = format_message(event)
+        if cfg.get('telegram'):
+            _post_telegram(cfg['telegram'], msg, opener=transport)
+        if cfg.get('webhook'):
+            _post_webhook(cfg['webhook'], event, opener=transport)
+    except Exception as e:
+        log.exception('dispatch failed unexpectedly: %s', e)

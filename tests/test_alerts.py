@@ -169,3 +169,20 @@ def test_dispatch_swallows_transport_errors():
     alerts.dispatch({'kind': 'quota_80', 'user': 'x',
                      'details': {'used_human': '1', 'total_human': '2', 'cycle': '2026-05'}},
                     config=cfg, opener=BoomOpener())  # must not raise
+
+
+def test_dispatch_swallows_format_errors():
+    """Malformed event details (e.g. non-numeric z) must NOT bubble out."""
+    cfg = {'webhook': {'url': 'https://example.invalid/'}}
+    opener = FakeOpener()
+    bad_event = {'kind': 'anomaly', 'user': 'x',
+                 'details': {'today_human': '?', 'mean_human': '?', 'z': None}}
+    alerts.dispatch(bad_event, config=cfg, opener=opener)  # must not raise
+
+
+def test_dispatch_handles_non_dict_config():
+    """A list or string passed as config must NOT crash dispatch."""
+    opener = FakeOpener()
+    alerts.dispatch({'kind': 'anomaly', 'user': 'x', 'details': {'z': 4.0}},
+                    config=['not', 'a', 'dict'], opener=opener)  # must not raise
+    assert opener.calls == []
