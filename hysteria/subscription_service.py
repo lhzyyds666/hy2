@@ -13,6 +13,8 @@ import subprocess
 import time
 import uuid
 import urllib.request
+
+import alerts
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from http.cookies import SimpleCookie
@@ -2564,6 +2566,10 @@ class Handler(BaseHTTPRequestHandler):
                 usage[mk][username] = {'tx': 0, 'rx': 0, 'total': 0}
                 after = {'tx': 0, 'rx': 0, 'total': 0}
                 save_json(USAGE_FILE, usage)
+                # Clear quota alert dedup so subsequent crossings re-fire (ADR-0001).
+                alert_state = alerts.load_state()
+                alerts.clear_quota_dedup_for(alert_state, [username])
+                alerts.save_state(alert_state)
             self.write_reset_log(self.get_admin_actor(), 'reset_usage_user', username, before, after)
             self.redirect('/admin?msg=reset+usage+' + username)
             return
@@ -2583,6 +2589,10 @@ class Handler(BaseHTTPRequestHandler):
                     before_all[username] = {'tx': tx, 'rx': rx, 'total': total}
                     usage[mk][username] = {'tx': 0, 'rx': 0, 'total': 0}
                 save_json(USAGE_FILE, usage)
+                # Clear quota alert dedup for all users (ADR-0001).
+                alert_state = alerts.load_state()
+                alerts.clear_quota_dedup_for(alert_state, list(users.keys()))
+                alerts.save_state(alert_state)
             self.write_reset_log(
                 self.get_admin_actor(),
                 'reset_usage_all',

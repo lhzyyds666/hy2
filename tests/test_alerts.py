@@ -56,6 +56,36 @@ def test_save_and_reload_state_roundtrip(tmp_path):
     assert not alerts.already_alerted(s2, 'anomaly', 'bob', '2026-05-04')
     assert not alerts.already_alerted(s2, 'anomaly', 'alice', '2026-05-05')
 
+
+def test_clear_quota_dedup_drops_only_named_users():
+    s = alerts.load_state('/no-such-path-' + str(id(object())))  # fresh empty
+    alerts.mark_alerted(s, 'quota_80', 'alice', '2026-05')
+    alerts.mark_alerted(s, 'quota_100', 'alice', '2026-05')
+    alerts.mark_alerted(s, 'quota_80', 'bob', '2026-05')
+    alerts.mark_alerted(s, 'anomaly', 'alice', '2026-05-05')
+    alerts.clear_quota_dedup_for(s, ['alice'])
+    assert not alerts.already_alerted(s, 'quota_80', 'alice', '2026-05')
+    assert not alerts.already_alerted(s, 'quota_100', 'alice', '2026-05')
+    assert alerts.already_alerted(s, 'quota_80', 'bob', '2026-05')  # untouched
+    assert alerts.already_alerted(s, 'anomaly', 'alice', '2026-05-05')  # day-scoped, untouched
+
+
+def test_clear_quota_dedup_handles_unknown_users():
+    """Calling with a username that was never alerted must not raise."""
+    s = alerts.load_state('/no-such-path-' + str(id(object())))
+    alerts.clear_quota_dedup_for(s, ['ghost'])  # must not raise
+
+
+def test_clear_quota_dedup_multi_user():
+    s = alerts.load_state('/no-such-path-' + str(id(object())))
+    alerts.mark_alerted(s, 'quota_80', 'alice', '2026-05')
+    alerts.mark_alerted(s, 'quota_80', 'bob', '2026-05')
+    alerts.mark_alerted(s, 'quota_80', 'carol', '2026-05')
+    alerts.clear_quota_dedup_for(s, ['alice', 'bob'])
+    assert not alerts.already_alerted(s, 'quota_80', 'alice', '2026-05')
+    assert not alerts.already_alerted(s, 'quota_80', 'bob', '2026-05')
+    assert alerts.already_alerted(s, 'quota_80', 'carol', '2026-05')
+
 # ---------- message formatting -------------------------------------------------
 
 def test_format_quota_80():

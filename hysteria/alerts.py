@@ -71,6 +71,18 @@ def mark_alerted(state, kind, user, key):
     state.setdefault(kind, {})[user] = key
 
 
+def clear_quota_dedup_for(state, usernames):
+    """Drop quota_80 / quota_100 dedup entries for `usernames` so subsequent
+    quota crossings within the same cycle re-fire alerts. Anomaly entries are
+    NOT touched — they're day-scoped and self-reset on the next calendar day.
+    See docs/adr/0001-manual-reset-clears-alert-dedup.md.
+    """
+    for kind in ('quota_80', 'quota_100'):
+        bucket = state.get(kind, {})
+        for u in usernames:
+            bucket.pop(u, None)
+
+
 def format_message(event):
     kind = event.get('kind')
     user = event.get('user', '?')
