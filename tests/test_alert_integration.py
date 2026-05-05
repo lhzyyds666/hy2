@@ -73,17 +73,18 @@ def test_anomaly_fires_once_per_day(tmp_path, monkeypatch):
 
 def test_quota_80_fires_when_crossed(tmp_path, monkeypatch):
     today = datetime(2026, 5, 5)
-    # No daily history → no anomaly. Just quota.
+    quota = 30 * GiB
+    # Aim for 90% of quota after scaling, regardless of DISPLAY_MULTIPLIER value.
+    raw = int(0.90 * quota / tl._DM)
     sent, opener, _ = _setup(
-        tmp_path, daily={}, usage={'2026-05': {'alice': {'tx': 0, 'rx': 12 * GiB,
-                                                         'total': 12 * GiB}}},
-        users={'alice': {'guest': True, 'monthly_quota_bytes': 30 * GiB}},
+        tmp_path, daily={},
+        usage={'2026-05': {'alice': {'tx': 0, 'rx': raw, 'total': raw}}},
+        users={'alice': {'guest': True, 'monthly_quota_bytes': quota}},
         online={}, monkeypatch=monkeypatch,
         alerts_cfg={'webhook': {'url': 'https://example.invalid/'}})
-    # 12 GiB raw * 2.28 multiplier = ~27.36 GiB, ~91% of 30 GiB → crosses both 80% and 100%? 91% only crosses 80%.
     tl.check_alerts(
-        usage={'2026-05': {'alice': {'tx': 0, 'rx': 12 * GiB, 'total': 12 * GiB}}},
-        users={'alice': {'guest': True, 'monthly_quota_bytes': 30 * GiB}},
+        usage={'2026-05': {'alice': {'tx': 0, 'rx': raw, 'total': raw}}},
+        users={'alice': {'guest': True, 'monthly_quota_bytes': quota}},
         online={}, now=today, month_key='2026-05', _opener=opener)
     assert len(sent) == 1
     assert b'quota_80' in sent[0]['body']
@@ -91,15 +92,17 @@ def test_quota_80_fires_when_crossed(tmp_path, monkeypatch):
 
 def test_quota_does_not_refire_same_month(tmp_path, monkeypatch):
     today = datetime(2026, 5, 5)
+    quota = 30 * GiB
+    raw = int(0.90 * quota / tl._DM)
     sent, opener, _ = _setup(
         tmp_path, daily={},
-        usage={'2026-05': {'alice': {'tx': 0, 'rx': 12 * GiB, 'total': 12 * GiB}}},
-        users={'alice': {'guest': True, 'monthly_quota_bytes': 30 * GiB}},
+        usage={'2026-05': {'alice': {'tx': 0, 'rx': raw, 'total': raw}}},
+        users={'alice': {'guest': True, 'monthly_quota_bytes': quota}},
         online={}, monkeypatch=monkeypatch,
         alerts_cfg={'webhook': {'url': 'https://example.invalid/'}})
     for _ in range(3):
         tl.check_alerts(
-            usage={'2026-05': {'alice': {'tx': 0, 'rx': 12 * GiB, 'total': 12 * GiB}}},
-            users={'alice': {'guest': True, 'monthly_quota_bytes': 30 * GiB}},
+            usage={'2026-05': {'alice': {'tx': 0, 'rx': raw, 'total': raw}}},
+            users={'alice': {'guest': True, 'monthly_quota_bytes': quota}},
             online={}, now=today, month_key='2026-05', _opener=opener)
     assert len(sent) == 1

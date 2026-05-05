@@ -8,6 +8,11 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from display import DISPLAY_MULTIPLIER
 
+import alerts as _alerts
+import anomaly as _anomaly
+
+_DM = DISPLAY_MULTIPLIER
+
 XRAY_BIN = "/usr/local/bin/xray"
 XRAY_API = "127.0.0.1:10085"
 XRAY_EMAIL_BACKUP_SUFFIX = "-backup"
@@ -194,11 +199,6 @@ def accumulate_daily(traffic, now):
         daily[day_key][uid] = cur
     prune_daily(daily, now.date())
     save_json(USAGE_DAILY_FILE, daily)
-
-
-import alerts as _alerts
-import anomaly as _anomaly
-from display import DISPLAY_MULTIPLIER as _DM
 
 
 def _fmt_bytes(n):
