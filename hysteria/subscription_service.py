@@ -7,6 +7,8 @@ import json
 import fcntl
 import re
 import secrets
+import shutil
+import subprocess
 import time
 import uuid
 import urllib.request
@@ -850,6 +852,14 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   .app .grid > .card, body::after, .app-logo::after { animation: none !important; }
 }
 
+/* ── Health cards ─────────────────────────────────────────── */
+.health-ok .v  { color: var(--ok); }
+.health-bad .v { color: var(--danger); }
+.health-ok::before, .health-bad::before { content: ''; display:block;
+  width: 6px; height: 6px; border-radius: 50%; margin-bottom: 6px; }
+.health-ok::before  { background: var(--ok);     box-shadow: 0 0 6px var(--ok-glow); }
+.health-bad::before { background: var(--danger); box-shadow: 0 0 6px var(--danger-glow); }
+
 /* ── Admin row sparkline ──────────────────────────────────── */
 .spark { display: block; }
 .spark-bar { fill: var(--text-muted); }
@@ -1221,6 +1231,7 @@ _ICONS = {
     'open': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
     'back': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>',
     'chart': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="11"/><line x1="3" y1="20" x2="21" y2="20"/></svg>',
+    'pulse': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
 }
 
 
@@ -1258,6 +1269,7 @@ def back_to_admin(label='返回管理后台'):
 _SIDEBAR_NAV = [
     ('dashboard', '/admin', '总览', 'dashboard'),
     ('daily', '/admin/daily', '每日流量', 'chart'),
+    ('health', '/admin/health', '健康状态', 'pulse'),
     ('config', '/admin/config', '模板配置', 'config'),
     ('rules', '/admin/rules', '路由规则', 'rules'),
     ('logs', '/admin/logs', '清零日志', 'logs'),
@@ -1846,6 +1858,83 @@ def render_daily_usage(host, days=14):
                               subtitle=f'{host} · 滚动窗口 {DAILY_RETENTION_DAYS} 天')
 
 
+def probe_cron_heartbeat():
+    """How long since the cron tick last wrote usage.json. Stale if >120s."""
+    try:
+        mt = USAGE_FILE.stat().st_mtime
+        age = int(time.time() - mt)
+        return {'ok': age < 120, 'label': f'{age} 秒前'}
+    except Exception:
+        return {'ok': False, 'label': '未知'}
+
+
+def probe_systemd(unit):
+    """`systemctl is-active <unit>` → ok if 'active'."""
+    try:
+        out = subprocess.run(['systemctl', 'is-active', unit],
+                             capture_output=True, text=True, timeout=3)
+        v = (out.stdout or '').strip()
+        return {'ok': v == 'active', 'label': v or '未知'}
+    except Exception:
+        return {'ok': False, 'label': '未知'}
+
+
+def probe_disk():
+    try:
+        u = shutil.disk_usage('/')
+        free_pct = u.free * 100 / u.total
+        return {'ok': free_pct > 15, 'label': f'{free_pct:.0f}% free'}
+    except Exception:
+        return {'ok': False, 'label': '未知'}
+
+
+def probe_cert(path=None):
+    p = Path(path) if path else Path('/root/hysteria/server.crt')
+    try:
+        out = subprocess.run(['openssl', 'x509', '-enddate', '-noout', '-in', str(p)],
+                             capture_output=True, text=True, timeout=3)
+        end_str = out.stdout.split('=', 1)[1].strip()
+        end_dt = datetime.strptime(end_str, '%b %d %H:%M:%S %Y %Z')
+        days = (end_dt - datetime.utcnow()).days
+        return {'ok': days > 14, 'label': f'{days} 天剩余'}
+    except Exception:
+        return {'ok': False, 'label': '未知'}
+
+
+def probe_online():
+    try:
+        data = load_json(ONLINE_FILE, {})
+        n = sum(int(v) for v in data.values())
+        return {'ok': True, 'label': f'{n} 在线'}
+    except Exception:
+        return {'ok': False, 'label': '未知'}
+
+
+def _health_card(title, probe_result):
+    cls = 'ok' if probe_result['ok'] else 'bad'
+    return (f'<div class="card stat health-{cls}">'
+            f'<div class="k">{html.escape(title)}</div>'
+            f'<div class="v">{html.escape(probe_result["label"])}</div>'
+            f'</div>')
+
+
+def render_health(host):
+    cards = [
+        _health_card('cron 心跳', probe_cron_heartbeat()),
+        _health_card('hysteria', probe_systemd('hysteria-server.service')),
+        _health_card('xray', probe_systemd('xray.service')),
+        _health_card('磁盘', probe_disk()),
+        _health_card('TLS 证书', probe_cert()),
+        _health_card('在线用户', probe_online()),
+    ]
+    content = (
+        '<div class="grid grid-3">' + ''.join(cards) + '</div>'
+        '<meta http-equiv="refresh" content="30">'
+    )
+    return render_admin_shell('health', '健康状态', content,
+                              badge=host, subtitle='30 秒自动刷新')
+
+
 def render_reset_logs(host, limit=300):
     from collections import deque
     rows = []
@@ -2328,6 +2417,14 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 days = 14
             self.send_response_body(200, render_daily_usage(host, days=days), 'text/html; charset=utf-8', send_payload)
+            return
+
+        if path == '/admin/health':
+            if not is_logged_in(self):
+                self.redirect('/login')
+                return
+            self.send_response_body(200, render_health(host),
+                                    'text/html; charset=utf-8', send_payload)
             return
 
         if path == '/admin/config':
