@@ -1658,6 +1658,47 @@ def _scale_daily_entry(entry):
     return int(tx * m), int(rx * m), int(total * m)
 
 
+def daily_window_for_user(uid, daily, *, days=30, today=None):
+    """Return [(YYYY-MM-DD, scaled_total_bytes), ...] oldest-first for `days`."""
+    today = today or datetime.now().date()
+    out = []
+    for i in reversed(range(days)):
+        dk = (today - timedelta(days=i)).strftime('%Y-%m-%d')
+        _tx, _rx, total = _scale_daily_entry((daily.get(dk) or {}).get(uid))
+        out.append((dk, total))
+    return out
+
+
+def sparkline_svg(values, *, height=24):
+    """Render a series of (date, bytes) into a compact bar SVG.
+
+    Last entry carries the `today` class; zero-valued days render no bar.
+    """
+    n = len(values)
+    if n == 0:
+        return '<svg class="spark" width="0" height="' + str(height) + '"></svg>'
+    max_v = max((v for _, v in values), default=0) or 1
+    bar_w = 3
+    gap = 1
+    width = n * bar_w + (n - 1) * gap
+    parts = []
+    for i, (dk, v) in enumerate(values):
+        if v <= 0:
+            continue
+        h = max(1, int(round(height * v / max_v)))
+        x = i * (bar_w + gap)
+        y = height - h
+        cls = 'spark-bar today' if i == n - 1 else 'spark-bar'
+        title = f'{dk}: {fmt_bytes(v)}'
+        parts.append(
+            f'<rect class="{cls}" x="{x}" y="{y}" width="{bar_w}" height="{h}">'
+            f'<title>{html.escape(title)}</title></rect>'
+        )
+    return (f'<svg class="spark" width="{width}" height="{height}" '
+            f'viewBox="0 0 {width} {height}" aria-label="30 天趋势">'
+            f'{"".join(parts)}</svg>')
+
+
 def render_daily_usage(host, days=14):
     days = max(1, min(DAILY_RETENTION_DAYS, int(days)))
     users = load_json(USERS_FILE, {})
