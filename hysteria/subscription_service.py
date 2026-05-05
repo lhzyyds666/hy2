@@ -319,12 +319,16 @@ svg[viewBox="0 0 24 24"] { width: 16px; height: 16px; flex: 0 0 auto; stroke-wid
 .topbar {
   position: sticky; top: 0; z-index: 5;
   height: var(--topbar-h);
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 22px;
+  display: flex; align-items: center; justify-content: center;
   background: rgba(6,8,10,0.85);
   backdrop-filter: saturate(160%) blur(8px);
   -webkit-backdrop-filter: saturate(160%) blur(8px);
   border-bottom: 1px solid var(--line);
+}
+.topbar-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; max-width: 1280px;
+  padding: 0 22px;
 }
 .page-title {
   margin: 0;
@@ -350,7 +354,7 @@ svg[viewBox="0 0 24 24"] { width: 16px; height: 16px; flex: 0 0 auto; stroke-wid
   letter-spacing: 0;
 }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
-.content { padding: 22px 22px 64px; max-width: 1280px; width: 100%; }
+.content { padding: 22px 22px 64px; max-width: 1280px; width: 100%; margin: 0 auto; }
 
 /* mobile sidebar toggle */
 .sidebar-toggle {
@@ -370,7 +374,7 @@ svg[viewBox="0 0 24 24"] { width: 16px; height: 16px; flex: 0 0 auto; stroke-wid
   .sidebar.open { transform: translateX(0); }
   .sidebar.open ~ .scrim, body.sidebar-open .scrim { display: block; }
   .sidebar-toggle { display: inline-flex; }
-  .topbar { padding: 0 14px; }
+  .topbar-inner { padding: 0 14px; }
   .content { padding: 14px 14px 48px; }
 }
 
@@ -1302,11 +1306,13 @@ def render_admin_shell(active, page_title, content, *, badge='', subtitle='', to
 <div class="scrim" id="scrim"></div>
 <div class="main">
   <header class="topbar">
-    <div class="row gap-sm">
-      <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="切换侧边栏">{icon("menu")}</button>
-      <h1 class="page-title">{html.escape(page_title)}{sub_html}</h1>
+    <div class="topbar-inner">
+      <div class="row gap-sm">
+        <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="切换侧边栏">{icon("menu")}</button>
+        <h1 class="page-title">{html.escape(page_title)}{sub_html}</h1>
+      </div>
+      <div class="topbar-actions">{topbar_extra}{badge_html}</div>
     </div>
-    <div class="topbar-actions">{topbar_extra}{badge_html}</div>
   </header>
   <div class="content">{content}</div>
 </div>
