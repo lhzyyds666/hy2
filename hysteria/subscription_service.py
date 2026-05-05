@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import fcntl
+import os
 import re
 import secrets
 import shutil
@@ -1891,8 +1892,12 @@ def probe_disk():
 def probe_cert(path=None):
     p = Path(path) if path else Path('/root/hysteria/server.crt')
     try:
+        # Force C locale so openssl emits English month names that strptime can parse.
+        env = {**os.environ, 'LC_ALL': 'C'}
         out = subprocess.run(['openssl', 'x509', '-enddate', '-noout', '-in', str(p)],
-                             capture_output=True, text=True, timeout=3)
+                             capture_output=True, text=True, timeout=3, env=env)
+        if out.returncode != 0 or '=' not in out.stdout:
+            return {'ok': False, 'label': '未知'}
         end_str = out.stdout.split('=', 1)[1].strip()
         end_dt = datetime.strptime(end_str, '%b %d %H:%M:%S %Y %Z')
         days = (end_dt - datetime.utcnow()).days

@@ -88,3 +88,41 @@ def test_render_health_page_loads(tmp_path, monkeypatch):
             html_out = ss.render_health('panel.example.com')
     assert '健康状态' in html_out
     assert 'cron' in html_out.lower() or '心跳' in html_out
+
+
+def test_probe_cert_happy_path():
+    """Mock openssl returning a known English-locale enddate; verify parsed days."""
+    fake_out = type('R', (), {
+        'stdout': 'notAfter=May  5 12:34:56 2099 GMT\n',
+        'returncode': 0,
+    })()
+    with patch.object(ss.subprocess, 'run', return_value=fake_out):
+        out = ss.probe_cert(path='/dev/null')
+    assert out['ok'] is True
+    assert '剩余' in out['label']
+
+
+def test_probe_cert_near_expiry():
+    """Cert with only 7 days left → not ok."""
+    near = datetime.utcnow() + timedelta(days=7)
+    months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    enddate = (f"{months[near.month-1]} {near.day:>2} "
+               f"{near.hour:02d}:{near.minute:02d}:{near.second:02d} "
+               f"{near.year} GMT")
+    fake_out = type('R', (), {
+        'stdout': f'notAfter={enddate}\n',
+        'returncode': 0,
+    })()
+    with patch.object(ss.subprocess, 'run', return_value=fake_out):
+        out = ss.probe_cert(path='/dev/null')
+    assert out['ok'] is False
+
+
+def test_probe_cert_openssl_failure():
+    """Non-zero returncode → 未知 without trying to parse stdout."""
+    fake_out = type('R', (), {'stdout': '', 'returncode': 1})()
+    with patch.object(ss.subprocess, 'run', return_value=fake_out):
+        out = ss.probe_cert(path='/dev/null')
+    assert out['ok'] is False
+    assert out['label'] == '未知'
