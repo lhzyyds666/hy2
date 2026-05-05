@@ -196,6 +196,86 @@ def accumulate_daily(traffic, now):
     save_json(USAGE_DAILY_FILE, daily)
 
 
+import alerts as _alerts
+import anomaly as _anomaly
+from display import DISPLAY_MULTIPLIER as _DM
+
+
+def _fmt_bytes(n):
+    n = float(max(0, int(n)))
+    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    i = 0
+    while n >= 1024 and i < len(units) - 1:
+        n /= 1024.0
+        i += 1
+    return f"{n:.2f} {units[i]}"
+
+
+def check_alerts(usage, users, online, now, month_key, *, _opener=None):
+    """Detect quota crossings and daily anomalies, dispatch alerts, persist dedup state.
+
+    Wrapped in a top-level try/except by the caller; this function may itself
+    raise on filesystem errors but those should never break the kick path.
+    """
+    cfg = _alerts.load_config()
+    if not cfg:
+        return  # nothing configured → nothing to send
+
+    state = _alerts.load_state()
+    daily = load_json(USAGE_DAILY_FILE, {})
+    today_date = now.date()
+
+    today_key = today_date.strftime('%Y-%m-%d')
+    z_threshold = float(cfg.get('anomaly_z_threshold', _alerts.DEFAULT_Z_THRESHOLD))
+    min_bytes = int(cfg.get('anomaly_min_bytes', _alerts.DEFAULT_MIN_BYTES))
+
+    month_usage = (usage or {}).get(month_key, {})
+
+    for uid, user_cfg in (users or {}).items():
+        # ---- quota crossings ----
+        quota = int((user_cfg or {}).get('monthly_quota_bytes', 0) or 0)
+        if (user_cfg or {}).get('guest') and quota > 0:
+            entry = month_usage.get(uid, 0)
+            if isinstance(entry, dict):
+                raw_total = int(entry.get('total', 0))
+            else:
+                raw_total = int(entry or 0)
+            scaled = int(raw_total * _DM)
+            pct = scaled * 100.0 / quota
+            if pct >= 100 and not _alerts.already_alerted(state, 'quota_100', uid, month_key):
+                _alerts.dispatch({
+                    'kind': 'quota_100', 'user': uid,
+                    'details': {'used_human': _fmt_bytes(scaled),
+                                'total_human': _fmt_bytes(quota),
+                                'cycle': month_key},
+                }, config=cfg, opener=_opener)
+                _alerts.mark_alerted(state, 'quota_100', uid, month_key)
+            elif pct >= 80 and not _alerts.already_alerted(state, 'quota_80', uid, month_key):
+                _alerts.dispatch({
+                    'kind': 'quota_80', 'user': uid,
+                    'details': {'used_human': _fmt_bytes(scaled),
+                                'total_human': _fmt_bytes(quota),
+                                'cycle': month_key},
+                }, config=cfg, opener=_opener)
+                _alerts.mark_alerted(state, 'quota_80', uid, month_key)
+
+        # ---- anomaly ----
+        if _alerts.already_alerted(state, 'anomaly', uid, today_key):
+            continue
+        hit = _anomaly.detect(uid, daily, today_date,
+                              z_threshold=z_threshold, min_bytes=min_bytes)
+        if hit is not None:
+            _alerts.dispatch({
+                'kind': 'anomaly', 'user': uid,
+                'details': {'today_human': _fmt_bytes(int(hit['today'] * _DM)),
+                            'mean_human': _fmt_bytes(int(hit['mean'] * _DM)),
+                            'z': hit['z']},
+            }, config=cfg, opener=_opener)
+            _alerts.mark_alerted(state, 'anomaly', uid, today_key)
+
+    _alerts.save_state(state)
+
+
 def main():
     users = load_json(USERS_FILE, {})
     now = datetime.now()
@@ -223,6 +303,12 @@ def main():
 
     online = get("/online")
     save_json(ONLINE_SNAPSHOT_FILE, online)
+
+    try:
+        check_alerts(usage, users, online, now, month_key)
+    except Exception as e:
+        import sys
+        print(f"alerts: skipped due to error: {e}", file=sys.stderr)
 
     to_kick = []
     for uid, cfg in users.items():
