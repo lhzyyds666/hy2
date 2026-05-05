@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 USERS_FILE = Path('/root/hysteria/users.json')
 USAGE_FILE = Path('/root/hysteria/state/usage.json')
+USAGE_DAILY_FILE = Path('/root/hysteria/state/usage_daily.json')
 ONLINE_FILE = Path('/root/hysteria/state/online.json')
 META_FILE = Path('/root/hysteria/subscription_meta.json')
 TEMPLATE_FILE = Path('/root/hysteria/template.yaml')
@@ -849,6 +850,30 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   .app .grid > .card, body::after, .app-logo::after { animation: none !important; }
 }
 
+/* ── Daily traffic table ──────────────────────────────────── */
+.daily-table th, .daily-table td { white-space: nowrap; }
+.daily-table .user-col {
+  position: sticky; left: 0; z-index: 1;
+  background: var(--surface);
+  text-align: left; min-width: 110px;
+  border-right: 1px solid var(--line);
+}
+.daily-table tbody tr:hover .user-col { background: var(--surface-hover); }
+.daily-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.daily-table .user-total { font-weight: 600; color: var(--text-strong); }
+.daily-table .day-col { text-align: right; min-width: 78px; padding-top: 8px; padding-bottom: 8px; }
+.daily-table .day-mmdd { font-weight: 600; font-size: 12px; color: var(--text); letter-spacing: 0.02em; }
+.daily-table .day-weekday { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.daily-table .day-cell { text-align: right; font-variant-numeric: tabular-nums; min-width: 78px; font-size: 12px; }
+.daily-table .empty-day { color: var(--text-faint); }
+.daily-table .day-today { background: var(--accent-glow); color: var(--text-strong); }
+.daily-table thead th.day-today { box-shadow: inset 0 -2px 0 var(--accent); }
+.daily-table tfoot { border-top: 1px solid var(--line-strong); }
+.daily-table tfoot td, .daily-table tfoot th {
+  color: var(--text-strong); font-weight: 600;
+  background: var(--surface-2);
+}
+
 @media (max-width: 980px) {
   .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid-3 { grid-template-columns: 1fr; }
@@ -1189,6 +1214,7 @@ _ICONS = {
     'copy': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
     'open': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
     'back': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>',
+    'chart': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="11"/><line x1="3" y1="20" x2="21" y2="20"/></svg>',
 }
 
 
@@ -1225,6 +1251,7 @@ def back_to_admin(label='返回管理后台'):
 
 _SIDEBAR_NAV = [
     ('dashboard', '/admin', '总览', 'dashboard'),
+    ('daily', '/admin/daily', '每日流量', 'chart'),
     ('config', '/admin/config', '模板配置', 'config'),
     ('rules', '/admin/rules', '路由规则', 'rules'),
     ('logs', '/admin/logs', '清零日志', 'logs'),
@@ -1611,6 +1638,144 @@ def render_admin(host, base_url, flash=''):
 
 def _action_label(action):
     return {'reset_usage_user': '清除用户流量', 'reset_usage_all': '清空全部流量'}.get(action, action)
+
+
+DAILY_RETENTION_DAYS = 30
+
+
+def _scale_daily_entry(entry):
+    """Scale a raw daily usage entry by DISPLAY_MULTIPLIER, returning (tx, rx, total)."""
+    if not entry:
+        return 0, 0, 0
+    if isinstance(entry, dict):
+        tx = int(entry.get('tx', 0))
+        rx = int(entry.get('rx', 0))
+        total = int(entry.get('total', tx + rx))
+    else:
+        total = int(entry or 0)
+        tx, rx = 0, total
+    m = DISPLAY_MULTIPLIER
+    return int(tx * m), int(rx * m), int(total * m)
+
+
+def render_daily_usage(host, days=14):
+    days = max(1, min(DAILY_RETENTION_DAYS, int(days)))
+    users = load_json(USERS_FILE, {})
+    daily = load_json(USAGE_DAILY_FILE, {})
+
+    today = datetime.now().date()
+    today_key = today.strftime('%Y-%m-%d')
+    window = [(today - timedelta(days=i)).strftime('%Y-%m-%d') for i in reversed(range(days))]
+    weekday_labels = ['一', '二', '三', '四', '五', '六', '日']
+
+    per_user = {}
+    user_window_total = {}
+    day_totals = {dk: 0 for dk in window}
+    overall_total = 0
+    for uid in users.keys():
+        per_user[uid] = {}
+        utot = 0
+        for dk in window:
+            tx, rx, tot = _scale_daily_entry((daily.get(dk) or {}).get(uid))
+            per_user[uid][dk] = (tx, rx, tot)
+            utot += tot
+            day_totals[dk] += tot
+            overall_total += tot
+        user_window_total[uid] = utot
+
+    sorted_uids = sorted(users.keys(), key=lambda u: user_window_total[u], reverse=True)
+
+    col_headers = []
+    for dk in window:
+        wd = weekday_labels[datetime.strptime(dk, '%Y-%m-%d').weekday()]
+        cls = ' day-today' if dk == today_key else ''
+        col_headers.append(
+            f'<th class="day-col{cls}" title="{dk}">'
+            f'<div class="day-mmdd">{dk[5:]}</div>'
+            f'<div class="day-weekday">周{wd}</div></th>'
+        )
+
+    rows = []
+    for uid in sorted_uids:
+        cells = []
+        for dk in window:
+            tx, rx, tot = per_user[uid][dk]
+            today_cls = ' day-today' if dk == today_key else ''
+            if tot <= 0:
+                cells.append(f'<td class="day-cell empty-day{today_cls}">—</td>')
+            else:
+                title = f'{dk} · ↑ {fmt_bytes(tx)} · ↓ {fmt_bytes(rx)}'
+                cells.append(
+                    f'<td class="day-cell{today_cls}" title="{html.escape(title)}">{fmt_bytes(tot)}</td>'
+                )
+        utot = user_window_total[uid]
+        utot_disp = fmt_bytes(utot) if utot > 0 else '—'
+        rows.append(
+            f'<tr><th class="user-col" scope="row">{html.escape(uid)}</th>'
+            f'<td class="num user-total">{utot_disp}</td>'
+            f'{"".join(cells)}</tr>'
+        )
+
+    if not rows:
+        rows.append(f'<tr><td colspan="{2 + days}" class="empty">暂无用户</td></tr>')
+
+    foot_cells = []
+    peak_day = None
+    peak_val = 0
+    for dk in window:
+        v = day_totals[dk]
+        if v > peak_val:
+            peak_val = v
+            peak_day = dk
+        today_cls = ' day-today' if dk == today_key else ''
+        foot_cells.append(
+            f'<td class="day-cell{today_cls}">{fmt_bytes(v) if v else "—"}</td>'
+        )
+
+    today_total = day_totals.get(today_key, 0)
+    avg_per_day = int(overall_total / days) if days else 0
+
+    switcher = ''.join(
+        f'<a class="btn btn-sm {"primary" if d == days else "secondary"}" '
+        f'href="/admin/daily?days={d}">{d} 天</a>'
+        for d in (7, 14, 30)
+    )
+
+    earliest_recorded = min(daily.keys()) if daily else '—'
+
+    content = f'''<div class="grid grid-4">
+  <div class="card stat"><div class="k">{days} 天总流量</div><div class="v big">{fmt_bytes(overall_total)}</div><div class="accent-bar"></div></div>
+  <div class="card stat"><div class="k">今日已用</div><div class="v">{fmt_bytes(today_total)}</div><div class="small">{today_key}</div></div>
+  <div class="card stat"><div class="k">日均</div><div class="v">{fmt_bytes(avg_per_day)}</div></div>
+  <div class="card stat"><div class="k">峰值日</div><div class="v">{fmt_bytes(peak_val) if peak_val else "—"}</div><div class="small">{peak_day or "—"}</div></div>
+</div>
+<div class="card mt-md" style="padding:14px 18px;">
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div class="bold">每日流量明细 · 最近 {days} 天</div>
+      <div class="small">最早数据：{earliest_recorded} · 保留 {DAILY_RETENTION_DAYS} 天</div>
+    </div>
+    <div class="row gap-sm">{switcher}</div>
+  </div>
+</div>
+<div class="card mt-md scroll-x" style="padding:0;overflow:auto;">
+  <table class="table daily-table">
+    <thead><tr>
+      <th class="user-col" style="padding-left:18px;">用户</th>
+      <th class="num">{days} 天累计</th>
+      {"".join(col_headers)}
+    </tr></thead>
+    <tbody>{"".join(rows)}</tbody>
+    <tfoot><tr>
+      <th class="user-col" style="padding-left:18px;">合计</th>
+      <td class="num user-total">{fmt_bytes(overall_total) if overall_total else "—"}</td>
+      {"".join(foot_cells)}
+    </tr></tfoot>
+  </table>
+</div>'''
+    return render_admin_shell('daily', '每日流量', content,
+                              badge=f'最近 {days} 天',
+                              subtitle=f'{host} · 滚动窗口 {DAILY_RETENTION_DAYS} 天')
 
 
 def render_reset_logs(host, limit=300):
@@ -2081,6 +2246,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.redirect('/login')
                 return
             self.send_response_body(200, render_reset_logs(host), 'text/html; charset=utf-8', send_payload)
+            return
+
+        if path == '/admin/daily':
+            if not is_logged_in(self):
+                self.redirect('/login')
+                return
+            try:
+                days = int((q.get('days') or ['14'])[0])
+            except ValueError:
+                days = 14
+            self.send_response_body(200, render_daily_usage(host, days=days), 'text/html; charset=utf-8', send_payload)
             return
 
         if path == '/admin/config':

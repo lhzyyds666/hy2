@@ -14,10 +14,12 @@ XRAY_EMAIL_BACKUP_SUFFIX = "-backup"
 
 USERS_FILE = "/root/hysteria/users.json"
 USAGE_FILE = "/root/hysteria/state/usage.json"
+USAGE_DAILY_FILE = "/root/hysteria/state/usage_daily.json"
 ONLINE_SNAPSHOT_FILE = "/root/hysteria/state/online.json"
 RESET_STATE_FILE = "/root/hysteria/state/auto_reset_state.json"
 RESET_LOG_FILE = "/root/hysteria/state/usage_reset.log"
 USAGE_LOCK_FILE = "/root/hysteria/state/usage.lock"
+DAILY_RETENTION_DAYS = 30
 API_BASE = "http://127.0.0.1:25413"
 API_SECRET = "__HY_API_SECRET__"
 
@@ -171,6 +173,29 @@ def merge_traffic(dst, src):
         cur["rx"] = int(cur.get("rx", 0)) + int(stat.get("rx", 0))
 
 
+def prune_daily(daily, today):
+    cutoff = (today - timedelta(days=DAILY_RETENTION_DAYS - 1)).strftime("%Y-%m-%d")
+    for k in list(daily.keys()):
+        if k < cutoff:
+            del daily[k]
+
+
+def accumulate_daily(traffic, now):
+    day_key = now.strftime("%Y-%m-%d")
+    daily = load_json(USAGE_DAILY_FILE, {})
+    daily.setdefault(day_key, {})
+    for uid, stat in traffic.items():
+        cur = normalize_usage_entry(daily[day_key].get(uid, 0))
+        tx = int(stat.get("tx", 0))
+        rx = int(stat.get("rx", 0))
+        cur["tx"] += tx
+        cur["rx"] += rx
+        cur["total"] += tx + rx
+        daily[day_key][uid] = cur
+    prune_daily(daily, now.date())
+    save_json(USAGE_DAILY_FILE, daily)
+
+
 def main():
     users = load_json(USERS_FILE, {})
     now = datetime.now()
@@ -194,6 +219,7 @@ def main():
             usage[month_key][uid] = cur
 
         save_json(USAGE_FILE, usage)
+        accumulate_daily(traffic, now)
 
     online = get("/online")
     save_json(ONLINE_SNAPSHOT_FILE, online)
