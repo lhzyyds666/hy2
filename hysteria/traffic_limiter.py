@@ -10,12 +10,12 @@ from display import DISPLAY_MULTIPLIER
 
 import alerts as _alerts
 import anomaly as _anomaly
+import xray_config
 
 _DM = DISPLAY_MULTIPLIER
 
 XRAY_BIN = "/usr/local/bin/xray"
 XRAY_API = "127.0.0.1:10085"
-XRAY_EMAIL_BACKUP_SUFFIX = "-backup"
 
 USERS_FILE = "/root/hysteria/users.json"
 USAGE_FILE = "/root/hysteria/state/usage.json"
@@ -161,7 +161,7 @@ def get_xray_traffic():
             continue
         email = parts[1]
         direction = parts[3]
-        uid = email[: -len(XRAY_EMAIL_BACKUP_SUFFIX)] if email.endswith(XRAY_EMAIL_BACKUP_SUFFIX) else email
+        uid = xray_config.strip_backup_suffix(email)
         val = int(stat.get("value", 0) or 0)
         entry = result.setdefault(uid, {"tx": 0, "rx": 0})
         if direction == "downlink":
