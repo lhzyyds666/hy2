@@ -69,3 +69,22 @@ def already_alerted(state, kind, user, key):
 
 def mark_alerted(state, kind, user, key):
     state.setdefault(kind, {})[user] = key
+
+
+def format_message(event):
+    kind = event.get('kind')
+    user = event.get('user', '?')
+    details = event.get('details') or {}
+    if kind == 'quota_80':
+        return (f"\U0001F7E1 {user} 已用 80% "
+                f"({details.get('used_human','?')} / {details.get('total_human','?')}) "
+                f"· 周期 {details.get('cycle','?')}")
+    if kind == 'quota_100':
+        return (f"\U0001F534 {user} 已耗尽 "
+                f"({details.get('used_human','?')} / {details.get('total_human','?')}) "
+                f"· 周期 {details.get('cycle','?')}")
+    if kind == 'anomaly':
+        z = details.get('z', 0.0)
+        return (f"⚠️ {user} 今日 {details.get('today_human','?')} "
+                f"(基线 {details.get('mean_human','?')}, z={z:.1f})")
+    return f"{kind}: {user}"

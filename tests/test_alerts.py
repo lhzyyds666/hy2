@@ -55,3 +55,36 @@ def test_save_and_reload_state_roundtrip(tmp_path):
     assert alerts.already_alerted(s2, 'anomaly', 'bob', '2026-05-05')
     assert not alerts.already_alerted(s2, 'anomaly', 'bob', '2026-05-04')
     assert not alerts.already_alerted(s2, 'anomaly', 'alice', '2026-05-05')
+
+# ---------- message formatting -------------------------------------------------
+
+def test_format_quota_80():
+    msg = alerts.format_message({
+        'kind': 'quota_80', 'user': 'alice',
+        'details': {'used_human': '12.0 GB', 'total_human': '15.0 GB',
+                    'cycle': '2026-05'},
+    })
+    assert 'alice' in msg and '80%' in msg and '12.0 GB' in msg and '2026-05' in msg
+
+
+def test_format_quota_100():
+    msg = alerts.format_message({
+        'kind': 'quota_100', 'user': 'bob',
+        'details': {'used_human': '15.5 GB', 'total_human': '15.0 GB',
+                    'cycle': '2026-05'},
+    })
+    assert 'bob' in msg and ('耗尽' in msg or '100' in msg)
+
+
+def test_format_anomaly():
+    msg = alerts.format_message({
+        'kind': 'anomaly', 'user': 'carol',
+        'details': {'today_human': '40.0 GB', 'mean_human': '5.0 GB',
+                    'z': 7.3},
+    })
+    assert 'carol' in msg and '40.0 GB' in msg and 'z=' in msg
+
+
+def test_format_unknown_kind_does_not_raise():
+    msg = alerts.format_message({'kind': 'mystery', 'user': 'x'})
+    assert isinstance(msg, str) and 'x' in msg
