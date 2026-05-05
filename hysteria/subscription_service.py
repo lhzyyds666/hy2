@@ -850,6 +850,12 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   .app .grid > .card, body::after, .app-logo::after { animation: none !important; }
 }
 
+/* ── Admin row sparkline ──────────────────────────────────── */
+.spark { display: block; }
+.spark-bar { fill: var(--text-muted); }
+.spark-bar.today { fill: var(--accent); }
+.spark-cell { padding-top: 14px; padding-bottom: 14px; min-width: 130px; }
+
 /* ── Daily traffic table ──────────────────────────────────── */
 .daily-table th, .daily-table td { white-space: nowrap; }
 .daily-table .user-col {
@@ -1437,8 +1443,11 @@ document.getElementById('copy-sub-btn').addEventListener('click', function() {{
     return html_page(f'{user} 用户面板', body)
 
 
-def row_form(user, cfg, online, host, base_url, usage_month=None):
+def row_form(user, cfg, online, host, base_url, usage_month=None, daily=None):
     tx, rx, used = scaled_usage_for_user(user, usage_month)
+    spark_cell = ''
+    if daily is not None:
+        spark_cell = f'<td class="spark-cell" data-role="spark">{sparkline_svg(daily_window_for_user(user, daily, days=30))}</td>'
     total = user_total_quota(cfg)
     max_devices = int(cfg.get('max_devices', 0) or 0)
     quota_gb = int(round(total / 1024 / 1024 / 1024)) if total > 0 else 0
@@ -1462,6 +1471,7 @@ def row_form(user, cfg, online, host, base_url, usage_month=None):
     </div>
   </div>
 </td>
+{spark_cell}
 <td>
   <div class="row" style="justify-content:space-between;margin-bottom:4px;">
     <span class="bold" data-role="used">{fmt_bytes(used)}</span>
@@ -1510,10 +1520,11 @@ def render_admin(host, base_url, flash=''):
     users = load_json(USERS_FILE, {})
     online = load_json(ONLINE_FILE, {})
     usage_month = load_json(USAGE_FILE, {}).get(month_key(), {})
+    daily = load_json(USAGE_DAILY_FILE, {})
     total_used = sum(scaled_usage_for_user(u, usage_month)[2] for u in users)
     alert = render_alert(flash_text(flash))
-    rows = ''.join(row_form(u, cfg, online, host, base_url, usage_month) for u, cfg in users.items()) \
-        or '<tr><td colspan="4" class="empty">暂无用户，使用下方表单创建第一个用户</td></tr>'
+    rows = ''.join(row_form(u, cfg, online, host, base_url, usage_month, daily) for u, cfg in users.items()) \
+        or '<tr><td colspan="5" class="empty">暂无用户，使用下方表单创建第一个用户</td></tr>'
     content = f'''{alert}
 <div class="grid grid-3">
   <div class="card stat"><div class="k">本月总流量</div><div class="v big" id="total-used">{fmt_bytes(total_used)}</div><div class="accent-bar"></div></div>
@@ -1530,7 +1541,7 @@ def render_admin(host, base_url, flash=''):
     <div class="bold">用户列表</div>
     <div class="small">实时刷新 · 每 5 秒</div>
   </div>
-  <table class="table"><thead><tr><th style="padding-left:18px;">用户</th><th>本月用量</th><th>操作</th><th style="padding-right:18px;">链接</th></tr></thead><tbody>{rows}</tbody></table>
+  <table class="table"><thead><tr><th style="padding-left:18px;">用户</th><th>30 天趋势</th><th>本月用量</th><th>操作</th><th style="padding-right:18px;">链接</th></tr></thead><tbody>{rows}</tbody></table>
 </div>
 <div class="card mt-md">
   <details class="summary-muted">
@@ -1565,7 +1576,8 @@ def render_admin(host, base_url, flash=''):
       used: tr.querySelector('[data-role="used"]'),
       bar: tr.querySelector('[data-role="bar"]'),
       detail: tr.querySelector('[data-role="detail"]'),
-      lastUsed: -1, lastOnline: -1, lastPercent: -1,
+      spark: tr.querySelector('[data-role="spark"]'),
+      lastUsed: -1, lastOnline: -1, lastPercent: -1, lastSpark: '',
     }});
   }});
   var totalEl = document.getElementById('total-used');
@@ -1591,6 +1603,10 @@ def render_admin(host, base_url, flash=''):
           setClass(row.bar, 'danger', u.percent >= 90);
           setText(row.detail, u.percent.toFixed(1)+'% · ↑'+fmt(u.tx)+' ↓'+fmt(u.rx));
           row.lastPercent = u.percent;
+        }}
+        if (u.spark_html && u.spark_html !== row.lastSpark) {{
+          if (row.spark) row.spark.innerHTML = u.spark_html;
+          row.lastSpark = u.spark_html;
         }}
       }});
     }} catch(e){{}} finally {{ inflight = false; }}
@@ -2265,6 +2281,7 @@ class Handler(BaseHTTPRequestHandler):
             users = load_json_cached(USERS_FILE, {})
             online = load_json_cached(ONLINE_FILE, {})
             usage_month = load_json_cached(USAGE_FILE, {}).get(month_key(), {})
+            daily = load_json_cached(USAGE_DAILY_FILE, {})
             user_list = []
             total_used = 0
             for u, cfg in users.items():
@@ -2279,6 +2296,7 @@ class Handler(BaseHTTPRequestHandler):
                     'total': total,
                     'percent': pct(used, total),
                     'online': int(online.get(u, 0)),
+                    'spark_html': sparkline_svg(daily_window_for_user(u, daily, days=30)),
                 })
             payload = json.dumps({'total_used': total_used, 'users': user_list}, ensure_ascii=True)
             self.send_response_body(200, payload, 'application/json; charset=utf-8', send_payload)

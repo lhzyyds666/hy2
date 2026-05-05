@@ -38,3 +38,22 @@ def test_title_contains_date_and_bytes():
     out = ss.sparkline_svg(vals)
     assert '<title>' in out and '2026-05-05' in out
     assert 'GB' in out  # fmt_bytes formats as 1.40 GB
+
+
+def test_admin_render_includes_sparkline_column(tmp_path, monkeypatch):
+    monkeypatch.setattr(ss, 'USERS_FILE', tmp_path / 'users.json', raising=False)
+    monkeypatch.setattr(ss, 'USAGE_FILE', tmp_path / 'usage.json', raising=False)
+    monkeypatch.setattr(ss, 'USAGE_DAILY_FILE', tmp_path / 'usage_daily.json', raising=False)
+    monkeypatch.setattr(ss, 'ONLINE_FILE', tmp_path / 'online.json', raising=False)
+
+    (tmp_path / 'users.json').write_text('{"alice": {"monthly_quota_bytes": 0}}')
+    (tmp_path / 'usage.json').write_text('{}')
+    (tmp_path / 'usage_daily.json').write_text(
+        '{"2026-05-05": {"alice": {"tx":0,"rx":1000000000,"total":1000000000}}}')
+    (tmp_path / 'online.json').write_text('{}')
+
+    out = ss.render_admin('panel.example.com', 'http://panel.example.com')
+    # New column header
+    assert '30 天趋势' in out or '趋势' in out
+    # SVG present in the row
+    assert 'class="spark"' in out
