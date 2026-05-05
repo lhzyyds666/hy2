@@ -73,7 +73,7 @@ def test_format_quota_100():
         'details': {'used_human': '15.5 GB', 'total_human': '15.0 GB',
                     'cycle': '2026-05'},
     })
-    assert 'bob' in msg and ('耗尽' in msg or '100' in msg)
+    assert 'bob' in msg and '耗尽' in msg and '15.5 GB' in msg and '2026-05' in msg
 
 
 def test_format_anomaly():
@@ -82,9 +82,9 @@ def test_format_anomaly():
         'details': {'today_human': '40.0 GB', 'mean_human': '5.0 GB',
                     'z': 7.3},
     })
-    assert 'carol' in msg and '40.0 GB' in msg and 'z=' in msg
+    assert 'carol' in msg and '40.0 GB' in msg and 'z=7.3' in msg
 
 
 def test_format_unknown_kind_does_not_raise():
     msg = alerts.format_message({'kind': 'mystery', 'user': 'x'})
-    assert isinstance(msg, str) and 'x' in msg
+    assert isinstance(msg, str) and 'x' in msg and 'mystery' in msg
