@@ -1446,6 +1446,9 @@ document.getElementById('copy-sub-btn').addEventListener('click', function() {{
 def row_form(user, cfg, online, host, base_url, usage_month=None, daily=None):
     tx, rx, used = scaled_usage_for_user(user, usage_month)
     spark_cell = ''
+    # NOTE: 30-day sparkline is rendered in 3 places — keep them in sync:
+    # (1) here in row_form (initial page); (2) sparkline_svg() emits class="spark";
+    # (3) /admin/usage.json sends spark_html, JS finds [data-role="spark"] and sets innerHTML.
     if daily is not None:
         spark_cell = f'<td class="spark-cell" data-role="spark">{sparkline_svg(daily_window_for_user(user, daily, days=30))}</td>'
     total = user_total_quota(cfg)
@@ -1690,6 +1693,12 @@ def sparkline_svg(values, *, height=24):
 
     Last entry carries the `today` class; zero-valued days render no bar.
     Width/height come from the viewBox so the caller's CSS can size the SVG.
+
+    Output contract (relied on by the admin dashboard's polling JS):
+    - Outermost element is `<svg class="spark" ...>` — JS uses this class.
+    - Each non-empty bar is `<rect class="spark-bar [today]" ...>` — CSS uses these.
+    Changing these class names requires updating row_form's data-role="spark"
+    cell and the tick() handler in render_admin's <script> block.
     """
     n = len(values)
     label = f'{n} 天趋势' if n else ''
@@ -2296,6 +2305,7 @@ class Handler(BaseHTTPRequestHandler):
                     'total': total,
                     'percent': pct(used, total),
                     'online': int(online.get(u, 0)),
+                    # NOTE: spark_html mirrors row_form's spark cell — see row_form for the 3-place coupling note.
                     'spark_html': sparkline_svg(daily_window_for_user(u, daily, days=30)),
                 })
             payload = json.dumps({'total_used': total_used, 'users': user_list}, ensure_ascii=True)
