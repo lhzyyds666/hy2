@@ -88,3 +88,84 @@ def test_format_anomaly():
 def test_format_unknown_kind_does_not_raise():
     msg = alerts.format_message({'kind': 'mystery', 'user': 'x'})
     assert isinstance(msg, str) and 'x' in msg and 'mystery' in msg
+
+
+# ---------- dispatch / transports ---------------------------------------------
+
+class FakeOpener:
+    """Mimics urllib.request.urlopen — captures calls and replays canned responses."""
+    def __init__(self):
+        self.calls = []
+
+    def urlopen(self, req, timeout=None):
+        body = req.data.decode('utf-8') if req.data else ''
+        self.calls.append({
+            'url': req.full_url,
+            'method': req.get_method(),
+            'headers': dict(req.header_items()),
+            'body': body,
+        })
+        class _Resp:
+            def read(self_inner):
+                return b''
+            def __enter__(self_inner):
+                return self_inner
+            def __exit__(self_inner, *a):
+                return False
+        return _Resp()
+
+
+def test_dispatch_no_op_when_config_none():
+    opener = FakeOpener()
+    alerts.dispatch({'kind': 'quota_80', 'user': 'a',
+                     'details': {'used_human': '1', 'total_human': '2', 'cycle': '2026-05'}},
+                    config=None, opener=opener)
+    assert opener.calls == []
+
+
+def test_dispatch_telegram_only():
+    cfg = {'telegram': {'bot_token': 'BOT', 'chat_id': 'CHAT'}}
+    opener = FakeOpener()
+    alerts.dispatch({'kind': 'anomaly', 'user': 'a',
+                     'details': {'today_human': '40 GB', 'mean_human': '5 GB', 'z': 7.0}},
+                    config=cfg, opener=opener)
+    assert len(opener.calls) == 1
+    call = opener.calls[0]
+    assert 'api.telegram.org/botBOT/sendMessage' in call['url']
+    # form-urlencoded body with chat_id and text
+    assert 'chat_id=CHAT' in call['body']
+    assert 'text=' in call['body']
+
+
+def test_dispatch_webhook_signs_when_secret_present():
+    cfg = {'webhook': {'url': 'https://example.invalid/hook', 'secret': 'topsecret'}}
+    opener = FakeOpener()
+    event = {'kind': 'quota_100', 'user': 'a',
+             'details': {'used_human': '20 GB', 'total_human': '15 GB', 'cycle': '2026-05'}}
+    alerts.dispatch(event, config=cfg, opener=opener)
+    assert len(opener.calls) == 1
+    call = opener.calls[0]
+    assert call['url'] == 'https://example.invalid/hook'
+    assert call['headers'].get('Content-type') == 'application/json'
+    assert call['headers'].get('X-hy2-signature', '').startswith('sha256=')
+
+
+def test_dispatch_webhook_unsigned_when_no_secret():
+    cfg = {'webhook': {'url': 'https://example.invalid/hook'}}
+    opener = FakeOpener()
+    alerts.dispatch({'kind': 'anomaly', 'user': 'x',
+                     'details': {'today_human': '1', 'mean_human': '1', 'z': 4.0}},
+                    config=cfg, opener=opener)
+    assert 'X-hy2-signature' not in opener.calls[0]['headers']
+
+
+def test_dispatch_swallows_transport_errors():
+    """Network failure must NOT bubble out — the cron tick continues."""
+    class BoomOpener:
+        def urlopen(self, *a, **k):
+            raise OSError('boom')
+    cfg = {'telegram': {'bot_token': 't', 'chat_id': 'c'},
+           'webhook': {'url': 'https://example.invalid/'}}
+    alerts.dispatch({'kind': 'quota_80', 'user': 'x',
+                     'details': {'used_human': '1', 'total_human': '2', 'cycle': '2026-05'}},
+                    config=cfg, opener=BoomOpener())  # must not raise

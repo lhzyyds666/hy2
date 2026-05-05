@@ -88,3 +88,47 @@ def format_message(event):
         return (f"⚠️ {user} 今日 {details.get('today_human','?')} "
                 f"(基线 {details.get('mean_human','?')}, z={z:.1f})")
     return f"{kind}: {user}"
+
+
+def _post_telegram(cfg, message, *, opener):
+    bot = cfg.get('bot_token')
+    chat = cfg.get('chat_id')
+    if not bot or not chat:
+        return
+    url = f'https://api.telegram.org/bot{bot}/sendMessage'
+    body = urllib.parse.urlencode({'chat_id': chat, 'text': message}).encode('utf-8')
+    req = urllib.request.Request(url, data=body, method='POST')
+    try:
+        opener.urlopen(req, timeout=5).read()
+    except (urllib.error.URLError, OSError) as e:
+        log.warning('telegram alert failed: %s', e)
+
+
+def _post_webhook(cfg, event, *, opener):
+    url = cfg.get('url')
+    if not url:
+        return
+    body = json.dumps(event, ensure_ascii=True).encode('utf-8')
+    headers = {'Content-Type': 'application/json'}
+    secret = cfg.get('secret')
+    if secret:
+        sig = hmac.new(secret.encode('utf-8'), body, hashlib.sha256).hexdigest()
+        headers['X-Hy2-Signature'] = f'sha256={sig}'
+    req = urllib.request.Request(url, data=body, method='POST', headers=headers)
+    try:
+        opener.urlopen(req, timeout=5).read()
+    except (urllib.error.URLError, OSError) as e:
+        log.warning('webhook alert failed: %s', e)
+
+
+def dispatch(event, *, config=None, opener=None):
+    """Fire `event` to every configured channel. Never raises."""
+    cfg = config if config is not None else load_config()
+    if not cfg:
+        return
+    transport = opener if opener is not None else urllib.request
+    msg = format_message(event)
+    if cfg.get('telegram'):
+        _post_telegram(cfg['telegram'], msg, opener=transport)
+    if cfg.get('webhook'):
+        _post_webhook(cfg['webhook'], event, opener=transport)
