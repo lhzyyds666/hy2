@@ -15,6 +15,7 @@ import uuid
 import urllib.request
 
 import alerts
+import user_compat
 import xray_config
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -623,13 +624,14 @@ def row_form(user, cfg, online, host, base_url, usage_month=None, daily=None):
     quota_gb = int(round(total / 1024 / 1024 / 1024)) if total > 0 else 0
     panel = f'{base_url}/panel/{user}?token={cfg.get("sub_token", "")}'
     sub_http = f'{base_url}/sub/{user}?token={cfg.get("sub_token", "")}'
-    guest_checked = 'checked' if cfg.get('guest') else ''
+    metered = user_compat.is_metered(cfg)
+    guest_checked = 'checked' if metered else ''
     percent = pct(used, total)
     bar_cls = 'danger' if percent >= 90 else ''
     bar_w = f'{percent:.1f}'
     user_esc = html.escape(user)
-    guest_badge = '<span class="badge badge-info">访客</span>' if cfg.get('guest') else ''
-    guest_preview = ' · 访客' if cfg.get('guest') else ''
+    guest_badge = '<span class="badge badge-info">访客</span>' if metered else ''
+    guest_preview = ' · 访客' if metered else ''
     summary_preview = f'<span class="summary-preview">{quota_gb or 150} GB · {max_devices or 2} 设备{guest_preview}</span>'
     return f'''<tr data-user="{user_esc}">
 <td>

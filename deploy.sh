@@ -80,6 +80,7 @@ render "$REPO_DIR/hysteria/traffic_limiter.py"       "$HY_DIR/traffic_limiter.py
 render "$REPO_DIR/hysteria/alerts.py"                "$HY_DIR/alerts.py"
 render "$REPO_DIR/hysteria/anomaly.py"               "$HY_DIR/anomaly.py"
 render "$REPO_DIR/hysteria/xray_config.py"           "$HY_DIR/xray_config.py"
+render "$REPO_DIR/hysteria/user_compat.py"           "$HY_DIR/user_compat.py"
 install -m 644 "$REPO_DIR/hysteria/admin.css"        "$HY_DIR/admin.css"
 install -m 644 "$REPO_DIR/hysteria/admin_poll.js"    "$HY_DIR/admin_poll.js"
 chmod 700 "$HY_DIR"/*.py

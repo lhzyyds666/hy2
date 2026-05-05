@@ -7,6 +7,8 @@ import sys
 import urllib.request
 from datetime import datetime
 
+import user_compat
+
 USERS_FILE = "/root/hysteria/users.json"
 USAGE_FILE = "/root/hysteria/state/usage.json"
 ONLINE_SNAPSHOT_FILE = "/root/hysteria/state/online.json"
@@ -83,7 +85,7 @@ def main():
     if not ok:
         sys.exit(1)
 
-    if u.get("guest"):
+    if user_compat.is_metered(u):
         now = datetime.now()
         if now.day >= 21:
             month_key = now.strftime("%Y-%m")

@@ -10,6 +10,7 @@ from display import DISPLAY_MULTIPLIER
 
 import alerts as _alerts
 import anomaly as _anomaly
+import user_compat
 import xray_config
 
 _DM = DISPLAY_MULTIPLIER
@@ -234,7 +235,7 @@ def check_alerts(usage, users, online, now, month_key, *, _opener=None):
     for uid, user_cfg in (users or {}).items():
         # ---- quota crossings ----
         quota = int((user_cfg or {}).get('monthly_quota_bytes', 0) or 0)
-        if (user_cfg or {}).get('guest') and quota > 0:
+        if user_compat.is_metered(user_cfg) and quota > 0:
             entry = month_usage.get(uid, 0)
             if isinstance(entry, dict):
                 raw_total = int(entry.get('total', 0))
@@ -312,7 +313,7 @@ def main():
 
     to_kick = []
     for uid, cfg in users.items():
-        if not cfg.get("guest"):
+        if not user_compat.is_metered(cfg):
             continue
         quota = int(cfg.get("monthly_quota_bytes", 0))
         if quota <= 0:
