@@ -1673,10 +1673,12 @@ def sparkline_svg(values, *, height=24):
     """Render a series of (date, bytes) into a compact bar SVG.
 
     Last entry carries the `today` class; zero-valued days render no bar.
+    Width/height come from the viewBox so the caller's CSS can size the SVG.
     """
     n = len(values)
+    label = f'{n} 天趋势' if n else ''
     if n == 0:
-        return '<svg class="spark" width="0" height="' + str(height) + '"></svg>'
+        return f'<svg class="spark" viewBox="0 0 0 {height}" aria-hidden="true"></svg>'
     max_v = max((v for _, v in values), default=0) or 1
     bar_w = 3
     gap = 1
@@ -1694,8 +1696,8 @@ def sparkline_svg(values, *, height=24):
             f'<rect class="{cls}" x="{x}" y="{y}" width="{bar_w}" height="{h}">'
             f'<title>{html.escape(title)}</title></rect>'
         )
-    return (f'<svg class="spark" width="{width}" height="{height}" '
-            f'viewBox="0 0 {width} {height}" aria-label="30 天趋势">'
+    return (f'<svg class="spark" viewBox="0 0 {width} {height}" '
+            f'aria-label="{html.escape(label)}">'
             f'{"".join(parts)}</svg>')
 
 
