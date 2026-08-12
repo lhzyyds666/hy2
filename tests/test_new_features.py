@@ -683,6 +683,126 @@ def test_apply_rule_pack_to_user_writes_clash_overrides(tmp_path, monkeypatch):
     assert cfg['clash_tun_route_exclude_address'] == ['202.117.80.11/32']
 
 
+@pytest.mark.parametrize(
+    ('rule_type', 'pattern', 'action', 'extra', 'expected'),
+    [
+        (
+            'DOMAIN-SUFFIX',
+            '.Example.COM.',
+            'PROXY',
+            '',
+            f'DOMAIN-SUFFIX,example.com,{ss.NODE_GROUP}',
+        ),
+        (
+            'DOMAIN',
+            '例子.测试',
+            'DIRECT',
+            '',
+            'DOMAIN,xn--fsqu00a.xn--0zwm56d,DIRECT',
+        ),
+        (
+            'IP-CIDR',
+            '10.0.0.7/8',
+            'DIRECT',
+            'no-resolve',
+            'IP-CIDR,10.0.0.0/8,DIRECT,no-resolve',
+        ),
+        (
+            'IP-CIDR6',
+            '2001:db8::42/64',
+            'REJECT',
+            'no-resolve',
+            'IP-CIDR6,2001:db8::/64,REJECT,no-resolve',
+        ),
+        (
+            'PROCESS-NAME',
+            'EasyConnect.exe',
+            'DIRECT',
+            '',
+            'PROCESS-NAME,EasyConnect.exe,DIRECT',
+        ),
+    ],
+)
+def test_build_user_clash_rule_validates_and_normalizes(
+    rule_type, pattern, action, extra, expected,
+):
+    rule, error = ss.build_user_clash_rule(
+        rule_type, pattern, action, extra,
+    )
+
+    assert error == ''
+    assert rule == expected
+
+
+@pytest.mark.parametrize(
+    ('rule_type', 'pattern', 'action', 'extra', 'expected_error'),
+    [
+        ('MATCH', 'anything', 'DIRECT', '', 'user_rule_invalid_type'),
+        ('DOMAIN', 'https://example.com', 'DIRECT', '', 'user_rule_invalid_pattern'),
+        ('DOMAIN', 'bad,example.com', 'DIRECT', '', 'user_rule_invalid_pattern'),
+        ('IP-CIDR', '2001:db8::/64', 'DIRECT', '', 'user_rule_invalid_pattern'),
+        ('IP-CIDR6', '10.0.0.0/8', 'DIRECT', '', 'user_rule_invalid_pattern'),
+        ('DOMAIN', 'example.com', 'ARBITRARY', '', 'user_rule_invalid_action'),
+        ('DOMAIN', 'example.com', 'DIRECT', 'no-resolve', 'user_rule_invalid_extra'),
+    ],
+)
+def test_build_user_clash_rule_rejects_unsafe_or_mismatched_fields(
+    rule_type, pattern, action, extra, expected_error,
+):
+    rule, error = ss.build_user_clash_rule(
+        rule_type, pattern, action, extra,
+    )
+
+    assert rule == ''
+    assert error == expected_error
+
+
+def test_add_and_delete_user_clash_rule_use_config_revision(
+    tmp_path, monkeypatch,
+):
+    users_file = tmp_path / 'users.json'
+    initial = {'alice': {'sub_token': 'tok'}}
+    users_file.write_text(json.dumps(initial), encoding='utf-8')
+    monkeypatch.setattr(ss, 'USERS_FILE', users_file)
+    monkeypatch.setattr(ss, 'USAGE_LOCK_FILE', tmp_path / 'usage.lock')
+    revision = ss.user_config_revision(initial['alice'])
+    rule = 'DOMAIN-SUFFIX,example.com,DIRECT'
+
+    assert ss.add_user_clash_rule('alice', rule, revision) == 'added'
+    cfg = json.loads(users_file.read_text(encoding='utf-8'))['alice']
+    assert cfg['clash_rules'] == [rule]
+    with pytest.raises(ss.UserRuleConflictError):
+        ss.add_user_clash_rule('alice', 'DOMAIN,new.example,DIRECT', revision)
+
+    current_revision = ss.user_config_revision(cfg)
+    assert ss.delete_user_clash_rule(
+        'alice', 0, rule, current_revision,
+    ) is True
+    cfg = json.loads(users_file.read_text(encoding='utf-8'))['alice']
+    assert 'clash_rules' not in cfg
+
+
+def test_user_clash_rule_limit_does_not_overwrite_existing_rules(
+    tmp_path, monkeypatch,
+):
+    rules = [f'DOMAIN,item-{index}.example,DIRECT'
+             for index in range(ss.USER_CLASH_RULE_MAX_COUNT)]
+    users_file = tmp_path / 'users.json'
+    initial = {'alice': {'sub_token': 'tok', 'clash_rules': rules}}
+    users_file.write_text(json.dumps(initial), encoding='utf-8')
+    monkeypatch.setattr(ss, 'USERS_FILE', users_file)
+    monkeypatch.setattr(ss, 'USAGE_LOCK_FILE', tmp_path / 'usage.lock')
+
+    result = ss.add_user_clash_rule(
+        'alice',
+        'DOMAIN,overflow.example,DIRECT',
+        ss.user_config_revision(initial['alice']),
+    )
+
+    assert result == 'limit'
+    assert json.loads(users_file.read_text(encoding='utf-8')) == initial
+
+
 def _write_user_base_template(path, domain):
     path.write_text(
         yaml.dump(
@@ -812,9 +932,13 @@ def test_logged_in_user_panel_renders_self_service_rule_packs(tmp_path, monkeypa
     )
 
     assert 'action="/user/rule-pack/apply"' in page
-    assert '应用到我的规则' in page
+    assert '应用预设规则包' in page
     assert 'EasyConnect 直连' in page
     assert 'name="user"' not in page
+    assert 'action="/user/rules/add"' in page
+    assert '添加到我的规则' in page
+    assert 'DOMAIN-SUFFIX（域名后缀）' in page
+    assert f'代理 ({ss.NODE_GROUP})' in page
     assert 'action="/user/template-mode"' in page
     assert '固定当前通用模板' in page
     assert '只更新底板，不会覆盖你的个人规则' in page
@@ -846,6 +970,37 @@ def test_pinned_user_panel_offers_common_template_merge(tmp_path, monkeypatch):
     assert '个人叠加项 1 条' in page
 
 
+def test_user_panel_lists_deletable_personal_rules_with_revision(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(ss, 'USAGE_DAILY_FILE', tmp_path / 'usage_daily.json')
+    monkeypatch.setattr(ss, 'ONLINE_FILE', tmp_path / 'online.json')
+    monkeypatch.setattr(ss, 'TEMPLATE_FILE', tmp_path / 'template.yaml')
+    (tmp_path / 'usage_daily.json').write_text('{}')
+    (tmp_path / 'online.json').write_text('{}')
+    (tmp_path / 'template.yaml').write_text('rules: []\n')
+    cfg = {
+        'sub_token': 'tok',
+        'monthly_quota_bytes': 1 << 30,
+        'max_devices': 2,
+        'clash_rules': [
+            f'DOMAIN-SUFFIX,private.example,{ss.NODE_GROUP}',
+            'IP-CIDR,10.0.0.0/8,DIRECT,no-resolve',
+        ],
+    }
+
+    page = ss.render_user_panel(
+        'h', 'http://h', 'alice', 'tok', cfg, session_auth=True,
+    )
+
+    assert 'private.example' in page
+    assert '10.0.0.0/8' in page
+    assert 'action="/user/rules/delete"' in page
+    assert page.count('name="expected_rule"') == 2
+    assert f'name="user_revision" value="{ss.user_config_revision(cfg)}"' in page
+    assert '2 / 128 条' in page
+
+
 def test_inactive_user_panel_omits_self_service_rule_packs(tmp_path, monkeypatch):
     monkeypatch.setattr(ss, 'USAGE_DAILY_FILE', tmp_path / 'usage_daily.json')
     monkeypatch.setattr(ss, 'ONLINE_FILE', tmp_path / 'online.json')
@@ -863,6 +1018,8 @@ def test_inactive_user_panel_omits_self_service_rule_packs(tmp_path, monkeypatch
     )
 
     assert 'action="/user/rule-pack/apply"' not in page
+    assert 'action="/user/rules/add"' not in page
+    assert 'action="/user/rules/delete"' not in page
     assert 'action="/user/template-mode"' not in page
 
 

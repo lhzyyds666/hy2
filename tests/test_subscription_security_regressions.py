@@ -536,6 +536,234 @@ def test_user_rule_pack_post_requires_an_active_user_session(
     assert "clash_rules" not in user
 
 
+def test_user_custom_rule_add_and_delete_are_session_scoped(
+    tmp_path, monkeypatch,
+):
+    state = _configure_state(
+        tmp_path,
+        monkeypatch,
+        users={
+            "alice": {
+                "sub_token": "alice-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+            },
+            "bob": {
+                "sub_token": "bob-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+            },
+        },
+    )
+    _write_valid_template(state["TEMPLATE_FILE"], "common.example")
+    sid = _seed_token_session(
+        state, user="alice", token="alice-token", sid="alice-session",
+    )
+    users = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))
+    original_revision = ss.user_config_revision(users["alice"])
+
+    with _running_server() as server:
+        added = _request(
+            server,
+            "POST",
+            "/user/rules/add",
+            form={
+                "rule_type": "DOMAIN-SUFFIX",
+                "pattern": ".Custom.Example.",
+                "action": "PROXY",
+                "extra": "",
+                "user_revision": original_revision,
+                "user": "bob",
+            },
+            headers={"Cookie": f"usid={sid}"},
+        )
+        subscription = _request(
+            server,
+            "GET",
+            "/sub/alice?token=alice-token",
+        )
+        users_after_add = json.loads(
+            state["USERS_FILE"].read_text(encoding="utf-8"),
+        )
+        rule = users_after_add["alice"]["clash_rules"][0]
+        deleted = _request(
+            server,
+            "POST",
+            "/user/rules/delete",
+            form={
+                "index": "0",
+                "expected_rule": rule,
+                "user_revision": ss.user_config_revision(
+                    users_after_add["alice"],
+                ),
+                "user": "bob",
+            },
+            headers={"Cookie": f"usid={sid}"},
+        )
+
+    users = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))
+    assert added.status == 302
+    assert added.headers["location"] == "/user/panel?msg=user_rule_added"
+    assert rule == f"DOMAIN-SUFFIX,custom.example,{ss.NODE_GROUP}"
+    assert subscription.status == 200
+    assert b"custom.example" in subscription.body
+    assert deleted.status == 302
+    assert deleted.headers["location"] == "/user/panel?msg=user_rule_deleted"
+    assert "clash_rules" not in users["alice"]
+    assert "clash_rules" not in users["bob"]
+
+
+def test_user_custom_rule_rejects_stale_revision_without_deleting(
+    tmp_path, monkeypatch,
+):
+    rule = "DOMAIN,keep.example,DIRECT"
+    state = _configure_state(
+        tmp_path,
+        monkeypatch,
+        users={
+            "alice": {
+                "sub_token": "alice-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+                "clash_rules": [rule],
+            },
+        },
+    )
+    sid = _seed_token_session(
+        state, user="alice", token="alice-token", sid="alice-session",
+    )
+    users = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))
+    stale_revision = ss.user_config_revision(users["alice"])
+    users["alice"]["note"] = "administrator changed this account"
+    _write_json(state["USERS_FILE"], users)
+
+    with _running_server() as server:
+        response = _request(
+            server,
+            "POST",
+            "/user/rules/delete",
+            form={
+                "index": "0",
+                "expected_rule": rule,
+                "user_revision": stale_revision,
+            },
+            headers={"Cookie": f"usid={sid}"},
+        )
+
+    user = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))["alice"]
+    assert response.status == 302
+    assert response.headers["location"] == "/user/panel?msg=user_rule_conflict"
+    assert user["clash_rules"] == [rule]
+    assert user["note"] == "administrator changed this account"
+
+
+def test_user_custom_rule_rejects_unapproved_type_and_action(
+    tmp_path, monkeypatch,
+):
+    state = _configure_state(
+        tmp_path,
+        monkeypatch,
+        users={
+            "alice": {
+                "sub_token": "alice-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+            },
+        },
+    )
+    sid = _seed_token_session(
+        state, user="alice", token="alice-token", sid="alice-session",
+    )
+    user = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))["alice"]
+    revision = ss.user_config_revision(user)
+
+    with _running_server() as server:
+        invalid_type = _request(
+            server,
+            "POST",
+            "/user/rules/add",
+            form={
+                "rule_type": "RULE-SET",
+                "pattern": "private",
+                "action": "DIRECT",
+                "user_revision": revision,
+            },
+            headers={"Cookie": f"usid={sid}"},
+        )
+        invalid_action = _request(
+            server,
+            "POST",
+            "/user/rules/add",
+            form={
+                "rule_type": "DOMAIN",
+                "pattern": "example.com",
+                "action": "arbitrary-group",
+                "user_revision": revision,
+            },
+            headers={"Cookie": f"usid={sid}"},
+        )
+
+    user = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))["alice"]
+    assert invalid_type.status == 302
+    assert invalid_type.headers["location"] == (
+        "/user/panel?msg=user_rule_invalid_type"
+    )
+    assert invalid_action.status == 302
+    assert invalid_action.headers["location"] == (
+        "/user/panel?msg=user_rule_invalid_action"
+    )
+    assert "clash_rules" not in user
+
+
+def test_user_custom_rule_mutation_requires_active_session(
+    tmp_path, monkeypatch,
+):
+    state = _configure_state(
+        tmp_path,
+        monkeypatch,
+        users={
+            "alice": {
+                "sub_token": "alice-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+                "disabled": True,
+            },
+        },
+    )
+    sid = _seed_token_session(
+        state, user="alice", token="alice-token", sid="alice-session",
+    )
+    user = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))["alice"]
+    form = {
+        "rule_type": "DOMAIN",
+        "pattern": "example.com",
+        "action": "DIRECT",
+        "user_revision": ss.user_config_revision(user),
+    }
+
+    with _running_server() as server:
+        inactive = _request(
+            server,
+            "POST",
+            "/user/rules/add",
+            form=form,
+            headers={"Cookie": f"usid={sid}"},
+        )
+        logged_out = _request(
+            server,
+            "POST",
+            "/user/rules/add",
+            form=form,
+        )
+
+    user = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))["alice"]
+    assert inactive.status == 302
+    assert inactive.headers["location"] == "/user/panel"
+    assert logged_out.status == 302
+    assert logged_out.headers["location"] == "/user/login"
+    assert "clash_rules" not in user
+
+
 def test_user_template_choice_is_session_scoped_and_merge_preserves_rules(
     tmp_path, monkeypatch,
 ):

@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import http.client
+import ipaddress
 import json
 import os
 import re
@@ -1117,6 +1118,29 @@ USER_TEMPLATE_MODE_KEY = profile_defs.USER_TEMPLATE_MODE_KEY
 USER_TEMPLATE_REVISION_KEY = profile_defs.USER_TEMPLATE_REVISION_KEY
 TEMPLATE_MODE_FOLLOW = profile_defs.TEMPLATE_MODE_FOLLOW
 TEMPLATE_MODE_PINNED = profile_defs.TEMPLATE_MODE_PINNED
+USER_CLASH_RULE_MAX_COUNT = 128
+USER_CLASH_RULE_TYPES = (
+    ('DOMAIN-SUFFIX', '域名后缀'),
+    ('DOMAIN', '完整域名'),
+    ('DOMAIN-KEYWORD', '域名关键词'),
+    ('IP-CIDR', 'IPv4 网段'),
+    ('IP-CIDR6', 'IPv6 网段'),
+    ('PROCESS-NAME', '进程名称'),
+)
+USER_CLASH_RULE_TYPE_KEYS = {key for key, _label in USER_CLASH_RULE_TYPES}
+USER_CLASH_RULE_ACTIONS = {
+    'DIRECT': 'DIRECT',
+    'PROXY': NODE_GROUP,
+    'REJECT': 'REJECT',
+}
+
+
+class UserRuleConflictError(RuntimeError):
+    """The user's configuration changed after their rule form was rendered."""
+
+
+class UserRuleStateError(RuntimeError):
+    """The stored personal rule list cannot be safely mutated."""
 
 
 def _subscription_profile_context():
@@ -3028,8 +3052,16 @@ def render_user_template_controls(cfg):
 
 
 def render_user_rule_pack_controls(cfg):
-    """Render rule-pack controls whose target is the current user session."""
+    """Render editable personal rules scoped to the current user session."""
     cfg = cfg if isinstance(cfg, dict) else {}
+    revision = user_config_revision(cfg)
+    rules_available = True
+    try:
+        personal_rules = _strict_user_clash_rules(cfg)
+    except UserRuleStateError:
+        personal_rules = []
+        rules_available = False
+
     current = []
     for config_key in (
         profile_defs.USER_CLASH_RULES_KEY,
@@ -3063,26 +3095,138 @@ def render_user_rule_pack_controls(cfg):
         summaries.append(
             f'<li><strong>{label}</strong>：{desc} {applied_badge}</li>'
         )
-    if not options:
-        return ''
+
+    type_options = ''.join(
+        f'<option value="{html.escape(key, quote=True)}">'
+        f'{html.escape(key)}（{html.escape(label)}）</option>'
+        for key, label in USER_CLASH_RULE_TYPES
+    )
+    rows = []
+    type_labels = dict(USER_CLASH_RULE_TYPES)
+    for index, rule in enumerate(personal_rules):
+        rule_type, pattern, action, extra = _parse_clash_rule(rule)
+        type_label = type_labels.get(rule_type, rule_type)
+        if action == NODE_GROUP:
+            action_label = '代理'
+        else:
+            action_label = _ACTION_LABELS.get(action, action)
+        extra_label = (
+            '<span class="badge gray">no-resolve</span>' if extra else ''
+        )
+        rows.append(
+            '<tr>'
+            f'<td>{index + 1}</td>'
+            f'<td>{html.escape(type_label)}</td>'
+            f'<td class="break"><code>{html.escape(pattern)}</code></td>'
+            f'<td>{html.escape(action_label)} {extra_label}</td>'
+            '<td>'
+            '<form method="post" action="/user/rules/delete" '
+            'class="inline-form-row" data-action="delete-user-rule">'
+            f'<input type="hidden" name="index" value="{index}">'
+            f'<input type="hidden" name="expected_rule" '
+            f'value="{html.escape(rule, quote=True)}">'
+            f'<input type="hidden" name="user_revision" value="{revision}">'
+            '<button class="btn danger-btn btn-sm" type="submit">删除</button>'
+            '</form></td></tr>'
+        )
+
+    state_alert = ''
+    disabled = ''
+    if not rules_available:
+        disabled = ' disabled aria-disabled="true"'
+        state_alert = render_alert(
+            '个人规则数据当前不可解析。为避免覆盖已有内容，新增和删除已暂停；请联系管理员修复。',
+            'err',
+        )
+    table_body = ''.join(rows) or (
+        '<tr><td colspan="5" class="empty">还没有个人规则，可在下方添加第一条。</td></tr>'
+    )
+    pack_section = ''
+    if options:
+        pack_section = f'''
+  <details class="mt-md">
+    <summary>使用预设规则包</summary>
+    <form method="post" action="/user/rule-pack/apply" class="inline-form mt-md">
+      <label for="user-rule-pack">规则包</label>
+      <div class="row gap-sm">
+        <select id="user-rule-pack" name="pack">{''.join(options)}</select>
+        <button class="btn secondary" type="submit">应用预设规则包</button>
+      </div>
+    </form>
+    <ul class="small mt-md">{''.join(summaries)}</ul>
+    <div class="small faint mt-sm">重复应用不会重复添加；规则包也只写入你的个人叠加层。</div>
+  </details>'''
+
     return f'''<div class="card mt-md">
   <div class="row" style="justify-content:space-between;align-items:flex-start;">
     <div>
       <h2 class="section-title">我的规则</h2>
-      <div class="small">选择规则包后只会更新你自己的叠加层，并应用在上方所选的通用模板底板上；客户端更新订阅后生效。</div>
+      <div class="small">规则只叠加到你的订阅，不会修改通用模板或其他用户；客户端更新订阅后生效。</div>
     </div>
-    <span class="badge">自助调整</span>
+    <span class="badge">{len(personal_rules)} / {USER_CLASH_RULE_MAX_COUNT} 条</span>
   </div>
-  <form method="post" action="/user/rule-pack/apply" class="inline-form mt-md">
-    <label for="user-rule-pack">规则包</label>
-    <div class="row gap-sm">
-      <select id="user-rule-pack" name="pack">{''.join(options)}</select>
-      <button class="btn" type="submit">应用到我的规则</button>
+  {state_alert}
+  <form method="post" action="/user/rules/add" class="inline-form mt-md">
+    <input type="hidden" name="user_revision" value="{revision}">
+    <div class="grid grid-2">
+      <div>
+        <label for="user-custom-rule-type">匹配类型</label>
+        <select id="user-custom-rule-type" name="rule_type"{disabled}>{type_options}</select>
+      </div>
+      <div>
+        <label for="user-custom-rule-pattern">匹配内容</label>
+        <input id="user-custom-rule-pattern" name="pattern" required maxlength="512"
+               placeholder="example.com、10.0.0.0/8 或程序名.exe"{disabled}>
+      </div>
+      <div>
+        <label for="user-custom-rule-action">处理方式</label>
+        <select id="user-custom-rule-action" name="action"{disabled}>
+          <option value="DIRECT">直连 (DIRECT)</option>
+          <option value="PROXY">代理 ({html.escape(NODE_GROUP)})</option>
+          <option value="REJECT">拦截 (REJECT)</option>
+        </select>
+      </div>
+      <div>
+        <label for="user-custom-rule-extra">IP 附加选项</label>
+        <select id="user-custom-rule-extra" name="extra" disabled>
+          <option value="">无</option>
+          <option value="no-resolve">no-resolve（跳过 DNS 解析）</option>
+        </select>
+      </div>
     </div>
+    <button class="btn mt-md" type="submit"{disabled}>添加到我的规则</button>
   </form>
-  <ul class="small mt-md">{''.join(summaries)}</ul>
-  <div class="small faint mt-sm">重复应用不会重复添加规则；此处不能修改其他用户或通用模板。</div>
-</div>'''
+  <div class="card scroll-x mt-md" tabindex="0" aria-label="我的个人规则，可横向滚动" style="padding:0;overflow:hidden;">
+    <table class="table">
+      <caption class="sr-only">我的个人规则</caption>
+      <thead><tr><th>#</th><th>类型</th><th>匹配内容</th><th>处理方式</th><th>操作</th></tr></thead>
+      <tbody>{table_body}</tbody>
+    </table>
+  </div>
+  {pack_section}
+  <div class="small faint mt-sm">个人规则优先于通用模板规则，从上到下匹配；新规则会插入最前面。</div>
+</div>
+<script>
+(function() {{
+  var type = document.getElementById('user-custom-rule-type');
+  var extra = document.getElementById('user-custom-rule-extra');
+  function syncUserRuleExtra() {{
+    if (!type || !extra) return;
+    var isIp = type.value === 'IP-CIDR' || type.value === 'IP-CIDR6';
+    extra.disabled = type.disabled || !isIp;
+    if (!isIp) extra.value = '';
+  }}
+  if (type) type.addEventListener('change', syncUserRuleExtra);
+  syncUserRuleExtra();
+  document.addEventListener('submit', function(event) {{
+    var form = event.target;
+    if (form && form.dataset.action === 'delete-user-rule' &&
+        !confirm('确认删除这条个人规则？')) {{
+      event.preventDefault();
+    }}
+  }});
+}})();
+</script>'''
 
 
 def _cycle_reset_info(now=None):
@@ -3170,6 +3314,17 @@ def render_user_panel(
             '规则包已应用到你的配置，客户端更新订阅后生效。'
         ),
         'invalid_rule_pack': '规则包无效，未修改你的配置。',
+        'user_rule_added': '个人规则已添加到最前面，客户端更新订阅后生效。',
+        'user_rule_deleted': '个人规则已删除，客户端更新订阅后生效。',
+        'user_rule_exists': '这条个人规则已经存在，没有重复添加。',
+        'user_rule_limit': '个人规则已达到 128 条上限，请先删除不再需要的规则。',
+        'user_rule_pattern_empty': '请填写规则的匹配内容。',
+        'user_rule_invalid_type': '不支持这种规则类型，未修改配置。',
+        'user_rule_invalid_action': '不支持这种处理方式，未修改配置。',
+        'user_rule_invalid_pattern': '匹配内容格式无效，请检查域名、网段或进程名称。',
+        'user_rule_invalid_extra': 'no-resolve 只能用于 IPv4/IPv6 网段规则。',
+        'user_rule_invalid_index': '要删除的规则序号无效，未修改配置。',
+        'user_rule_conflict': '个人规则已在其他页面发生变化，请查看最新列表后重试。',
         'template_following': '已改为自动跟随，下一次拉取将使用最新版通用模板，并保留你的个人规则。',
         'template_pinned': '已固定当前通用模板；以后通用模板更新时，由你决定何时合并。',
         'template_merged': '已合并最新版通用模板，你的个人规则保持不变。',
@@ -3222,6 +3377,9 @@ def render_user_panel(
             if notice_code in (
                 'token_rotated',
                 'rule_pack_applied',
+                'user_rule_added',
+                'user_rule_deleted',
+                'user_rule_exists',
                 'template_following',
                 'template_pinned',
                 'template_merged',
@@ -4955,6 +5113,165 @@ def apply_rule_pack_to_template(pack_key, expected_revision=None):
         return True
 
 
+def _normalize_user_domain_pattern(pattern, *, keyword=False, suffix=False):
+    value = str(pattern or '').strip()
+    if keyword:
+        if (
+            not value
+            or len(value) > 128
+            or any(ch.isspace() or ch in ',/' or ord(ch) < 32 for ch in value)
+        ):
+            return ''
+        return value.lower()
+
+    if suffix:
+        value = value.lstrip('.')
+    value = value.rstrip('.')
+    if (
+        not value
+        or len(value) > 253
+        or '://' in value
+        or any(ch.isspace() or ch in ',/' or ord(ch) < 32 for ch in value)
+    ):
+        return ''
+    try:
+        ascii_value = value.encode('idna').decode('ascii').lower()
+    except UnicodeError:
+        return ''
+    labels = ascii_value.split('.')
+    if len(ascii_value) > 253 or any(
+        not re.fullmatch(
+            r'[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?',
+            label,
+        )
+        for label in labels
+    ):
+        return ''
+    return ascii_value
+
+
+def build_user_clash_rule(rule_type, pattern, action, extra=''):
+    """Validate form fields and return (rule, error-code)."""
+    rule_type = str(rule_type or '').strip().upper()
+    pattern = str(pattern or '').strip()
+    action = str(action or '').strip().upper()
+    extra = str(extra or '').strip().lower()
+    if not pattern:
+        return '', 'user_rule_pattern_empty'
+    if rule_type not in USER_CLASH_RULE_TYPE_KEYS:
+        return '', 'user_rule_invalid_type'
+    if action not in USER_CLASH_RULE_ACTIONS:
+        return '', 'user_rule_invalid_action'
+    if (
+        len(pattern) > 512
+        or ',' in pattern
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in pattern)
+    ):
+        return '', 'user_rule_invalid_pattern'
+
+    if rule_type in ('DOMAIN', 'DOMAIN-SUFFIX'):
+        pattern = _normalize_user_domain_pattern(
+            pattern,
+            suffix=rule_type == 'DOMAIN-SUFFIX',
+        )
+        if not pattern:
+            return '', 'user_rule_invalid_pattern'
+    elif rule_type == 'DOMAIN-KEYWORD':
+        pattern = _normalize_user_domain_pattern(pattern, keyword=True)
+        if not pattern:
+            return '', 'user_rule_invalid_pattern'
+    elif rule_type in ('IP-CIDR', 'IP-CIDR6'):
+        try:
+            network = ipaddress.ip_network(pattern, strict=False)
+        except ValueError:
+            return '', 'user_rule_invalid_pattern'
+        expected_version = 4 if rule_type == 'IP-CIDR' else 6
+        if network.version != expected_version:
+            return '', 'user_rule_invalid_pattern'
+        pattern = str(network)
+    elif rule_type == 'PROCESS-NAME':
+        if not pattern or len(pattern) > 255:
+            return '', 'user_rule_invalid_pattern'
+
+    if extra not in ('', 'no-resolve'):
+        return '', 'user_rule_invalid_extra'
+    if extra and rule_type not in ('IP-CIDR', 'IP-CIDR6'):
+        return '', 'user_rule_invalid_extra'
+
+    rule = f'{rule_type},{pattern},{USER_CLASH_RULE_ACTIONS[action]}'
+    if extra:
+        rule += f',{extra}'
+    if not validate_clash_rule(rule):
+        return '', 'user_rule_invalid_pattern'
+    return rule, ''
+
+
+def _strict_user_clash_rules(cfg):
+    raw = cfg.get(profile_defs.USER_CLASH_RULES_KEY, [])
+    if not isinstance(raw, list) or any(
+        not isinstance(rule, str) or not validate_clash_rule(rule)
+        for rule in raw
+    ):
+        raise UserRuleStateError('stored personal Clash rules are invalid')
+    return list(raw)
+
+
+def add_user_clash_rule(username, rule, expected_revision):
+    username = str(username or '').strip()
+    if not username:
+        return 'missing'
+    with usage_lock():
+        users = load_json(USERS_FILE, {})
+        cfg = users.get(username)
+        if not isinstance(cfg, dict):
+            return 'missing'
+        if not revision_matches(cfg, expected_revision):
+            raise UserRuleConflictError('user config revision changed')
+        rules = _strict_user_clash_rules(cfg)
+        if rule in rules:
+            return 'exists'
+        if len(rules) >= USER_CLASH_RULE_MAX_COUNT:
+            return 'limit'
+        cfg[profile_defs.USER_CLASH_RULES_KEY] = [rule, *rules]
+        users[username] = cfg
+        save_json(USERS_FILE, users)
+    return 'added'
+
+
+def delete_user_clash_rule(
+    username,
+    index,
+    expected_rule,
+    expected_revision,
+):
+    username = str(username or '').strip()
+    if not username:
+        return False
+    with usage_lock():
+        users = load_json(USERS_FILE, {})
+        cfg = users.get(username)
+        if not isinstance(cfg, dict):
+            return False
+        if not revision_matches(cfg, expected_revision):
+            raise UserRuleConflictError('user config revision changed')
+        rules = _strict_user_clash_rules(cfg)
+        if index < 0 or index >= len(rules):
+            return False
+        if not hmac.compare_digest(
+            rules[index].encode('utf-8'),
+            str(expected_rule or '').encode('utf-8'),
+        ):
+            raise UserRuleConflictError('personal rule changed at requested index')
+        rules.pop(index)
+        if rules:
+            cfg[profile_defs.USER_CLASH_RULES_KEY] = rules
+        else:
+            cfg.pop(profile_defs.USER_CLASH_RULES_KEY, None)
+        users[username] = cfg
+        save_json(USERS_FILE, users)
+    return True
+
+
 def apply_rule_pack_to_user(username, pack_key):
     username = str(username or '').strip()
     if not username:
@@ -5048,9 +5365,9 @@ def _parse_clash_rule(rule_str):
 _RULE_TYPE_LABELS = {
     'DOMAIN-SUFFIX': '域名后缀', 'DOMAIN-KEYWORD': '域名关键词', 'DOMAIN': '完整域名',
     'IP-CIDR': 'IP 段', 'IP-CIDR6': 'IPv6 段', 'GEOIP': 'GeoIP',
-    'RULE-SET': '规则集', 'MATCH': '兜底',
+    'PROCESS-NAME': '进程名称', 'RULE-SET': '规则集', 'MATCH': '兜底',
 }
-_ACTION_LABELS = {'DIRECT': '直连', 'REJECT': '拦截'}
+_ACTION_LABELS = {'DIRECT': '直连', 'REJECT': '拦截', NODE_GROUP: '代理'}
 
 
 _RULES_FLASH = {
@@ -6216,6 +6533,115 @@ class Handler(BaseHTTPRequestHandler):
                 cookie=clear_user_session_cookie(secure=is_secure_request(self)),
                 status=303,
             )
+            return
+
+        if path == '/user/rules/add':
+            user, session_kind = get_logged_in_user_context(self)
+            if not user:
+                self.redirect('/user/login')
+                return
+            cfg = load_json(USERS_FILE, {}).get(user)
+            access_error = user_panel_access_error(
+                cfg, session_kind, today=local_now().date(),
+            )
+            if access_error == 'password_change_required':
+                self.redirect('/user/change-password')
+                return
+            if access_error in ('disabled', 'expired'):
+                self.redirect('/user/panel')
+                return
+            if access_error:
+                self.redirect('/user/login')
+                return
+            rule, error = build_user_clash_rule(
+                (form.get('rule_type') or [''])[0],
+                (form.get('pattern') or [''])[0],
+                (form.get('action') or [''])[0],
+                (form.get('extra') or [''])[0],
+            )
+            if error:
+                self.redirect(f'/user/panel?msg={error}')
+                return
+            expected_revision = (
+                form.get('user_revision') or ['']
+            )[0]
+            try:
+                result = add_user_clash_rule(
+                    user,
+                    rule,
+                    expected_revision,
+                )
+            except UserRuleConflictError:
+                self.redirect('/user/panel?msg=user_rule_conflict')
+                return
+            except UserRuleStateError:
+                self.send_response_body(
+                    503,
+                    '个人规则数据当前不可用，为避免覆盖已有内容，本次新增未执行。',
+                    'text/plain; charset=utf-8',
+                    True,
+                )
+                return
+            messages = {
+                'added': 'user_rule_added',
+                'exists': 'user_rule_exists',
+                'limit': 'user_rule_limit',
+            }
+            if result not in messages:
+                self.redirect('/user/login')
+                return
+            self.redirect(f'/user/panel?msg={messages[result]}')
+            return
+
+        if path == '/user/rules/delete':
+            user, session_kind = get_logged_in_user_context(self)
+            if not user:
+                self.redirect('/user/login')
+                return
+            cfg = load_json(USERS_FILE, {}).get(user)
+            access_error = user_panel_access_error(
+                cfg, session_kind, today=local_now().date(),
+            )
+            if access_error == 'password_change_required':
+                self.redirect('/user/change-password')
+                return
+            if access_error in ('disabled', 'expired'):
+                self.redirect('/user/panel')
+                return
+            if access_error:
+                self.redirect('/user/login')
+                return
+            try:
+                index = int((form.get('index') or [''])[0])
+            except (TypeError, ValueError):
+                self.redirect('/user/panel?msg=user_rule_invalid_index')
+                return
+            expected_rule = (form.get('expected_rule') or [''])[0]
+            expected_revision = (
+                form.get('user_revision') or ['']
+            )[0]
+            try:
+                deleted = delete_user_clash_rule(
+                    user,
+                    index,
+                    expected_rule,
+                    expected_revision,
+                )
+            except UserRuleConflictError:
+                self.redirect('/user/panel?msg=user_rule_conflict')
+                return
+            except UserRuleStateError:
+                self.send_response_body(
+                    503,
+                    '个人规则数据当前不可用，为避免覆盖已有内容，本次删除未执行。',
+                    'text/plain; charset=utf-8',
+                    True,
+                )
+                return
+            if not deleted:
+                self.redirect('/user/panel?msg=user_rule_invalid_index')
+                return
+            self.redirect('/user/panel?msg=user_rule_deleted')
             return
 
         if path == '/user/rule-pack/apply':
