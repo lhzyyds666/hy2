@@ -424,6 +424,89 @@ def test_token_session_is_not_blocked_by_password_change_gate(
     assert json.loads(payload.body)["total_bytes"] == 1024
 
 
+def test_user_rule_pack_post_is_scoped_to_authenticated_user(
+    tmp_path, monkeypatch,
+):
+    state = _configure_state(
+        tmp_path,
+        monkeypatch,
+        users={
+            "alice": {
+                "sub_token": "alice-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+            },
+            "bob": {
+                "sub_token": "bob-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+            },
+        },
+    )
+    sid = _seed_token_session(
+        state, user="alice", token="alice-token", sid="alice-session",
+    )
+
+    with _running_server() as server:
+        response = _request(
+            server,
+            "POST",
+            "/user/rule-pack/apply",
+            form={"pack": "overleaf", "user": "bob"},
+            headers={"Cookie": f"usid={sid}"},
+        )
+
+    users = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))
+    assert response.status == 302
+    assert response.headers["location"] == (
+        "/user/panel?msg=rule_pack_applied"
+    )
+    assert any("overleaf.com" in rule for rule in users["alice"]["clash_rules"])
+    assert "clash_rules" not in users["bob"]
+
+
+def test_user_rule_pack_post_requires_an_active_user_session(
+    tmp_path, monkeypatch,
+):
+    state = _configure_state(
+        tmp_path,
+        monkeypatch,
+        users={
+            "alice": {
+                "sub_token": "alice-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+                "disabled": True,
+            },
+        },
+    )
+    sid = _seed_token_session(
+        state, user="alice", token="alice-token", sid="alice-session",
+    )
+
+    with _running_server() as server:
+        inactive = _request(
+            server,
+            "POST",
+            "/user/rule-pack/apply",
+            form={"pack": "easyconnect"},
+            headers={"Cookie": f"usid={sid}"},
+        )
+        logged_out = _request(
+            server,
+            "POST",
+            "/user/rule-pack/apply",
+            form={"pack": "easyconnect"},
+        )
+
+    user = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))["alice"]
+    assert inactive.status == 302
+    assert inactive.headers["location"] == "/user/panel"
+    assert logged_out.status == 302
+    assert logged_out.headers["location"] == "/user/login"
+    assert "clash_rules" not in user
+
+
 @pytest.mark.parametrize(
     ("inactive_fields", "expected_error", "expected_message"),
     [

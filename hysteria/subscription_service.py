@@ -2931,6 +2931,64 @@ def render_subscription_profile_links(base_url, user, token):
     )
 
 
+def render_user_rule_pack_controls(cfg):
+    """Render rule-pack controls whose target is the current user session."""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    current = []
+    for config_key in (
+        profile_defs.USER_CLASH_RULES_KEY,
+        profile_defs.USER_FAKE_IP_FILTER_KEY,
+        profile_defs.USER_TUN_ROUTE_EXCLUDE_ADDRESS_KEY,
+    ):
+        values = cfg.get(config_key)
+        if isinstance(values, list):
+            current.extend(values)
+
+    options = []
+    summaries = []
+    for key in RULE_PACK_ORDER:
+        pack = RULE_PACKS.get(key)
+        if not isinstance(pack, dict):
+            continue
+        label = html.escape(str(pack.get('label') or key))
+        desc = html.escape(str(pack.get('desc') or ''))
+        additions = []
+        for pack_key in ('rules', 'fake_ip_filter', 'tun_route_exclude_address'):
+            values = pack.get(pack_key)
+            if isinstance(values, list):
+                additions.extend(values)
+        applied = bool(additions) and all(item in current for item in additions)
+        status = ' · 已应用' if applied else ''
+        options.append(
+            f'<option value="{html.escape(key, quote=True)}">'
+            f'{label}{status}</option>'
+        )
+        applied_badge = '<span class="badge">已应用</span>' if applied else ''
+        summaries.append(
+            f'<li><strong>{label}</strong>：{desc} {applied_badge}</li>'
+        )
+    if not options:
+        return ''
+    return f'''<div class="card mt-md">
+  <div class="row" style="justify-content:space-between;align-items:flex-start;">
+    <div>
+      <h2 class="section-title">我的规则</h2>
+      <div class="small">选择规则包后只会更新你自己的订阅配置，客户端更新订阅后生效。</div>
+    </div>
+    <span class="badge">自助调整</span>
+  </div>
+  <form method="post" action="/user/rule-pack/apply" class="inline-form mt-md">
+    <label for="user-rule-pack">规则包</label>
+    <div class="row gap-sm">
+      <select id="user-rule-pack" name="pack">{''.join(options)}</select>
+      <button class="btn" type="submit">应用到我的规则</button>
+    </div>
+  </form>
+  <ul class="small mt-md">{''.join(summaries)}</ul>
+  <div class="small faint mt-sm">重复应用不会重复添加规则；此处不能修改其他用户或全局模板。</div>
+</div>'''
+
+
 def _cycle_reset_info(now=None):
     """Return (next_reset_date_str, days_left, cycle_length_days) for the panel
     quota-reset countdown. days_left is at least 1 — today is always strictly
@@ -3012,6 +3070,10 @@ def render_user_panel(
         disabled_banner = render_alert('账号已到期，请联系管理员续费', 'err')
     inactive = is_disabled or is_expired
     notice_messages = {
+        'rule_pack_applied': (
+            '规则包已应用到你的配置，客户端更新订阅后生效。'
+        ),
+        'invalid_rule_pack': '规则包无效，未修改你的配置。',
         'token_rotated': (
             'Token 已重置，旧订阅与面板链接已失效。系统已请求断开'
             '现有 Hysteria 连接，并将在短暂延迟后再次复核；'
@@ -3055,7 +3117,11 @@ def render_user_panel(
     notice_message = notice_messages.get(notice_code, '')
     notice_banner = render_alert(
         notice_message,
-        'flash' if notice_code == 'token_rotated' else 'err',
+        (
+            'flash'
+            if notice_code in ('token_rotated', 'rule_pack_applied')
+            else 'err'
+        ),
     )
     if inactive:
         import_assistant = (
@@ -3067,6 +3133,11 @@ def render_user_panel(
         )
     else:
         import_assistant = render_subscription_profile_links(base_url, user, token)
+    rule_pack_controls = (
+        render_user_rule_pack_controls(cfg)
+        if session_auth and not inactive
+        else ''
+    )
     password_session = (
         session_auth and session_kind == USER_SESSION_PANEL_PASSWORD
     )
@@ -3309,6 +3380,7 @@ def render_user_panel(
   <div class="small mt-sm faint">本周期 {cycle_len} 天 · 重置于 {reset_date} · 还剩 {days_left} 天 · 有效期 {html.escape(expiry["label"])}</div>
 </div>
 {import_assistant}
+{rule_pack_controls}
 <div class="card mt-md">
   <h2 class="section-title">近 30 天用量趋势</h2>
   <div class="panel-trend">{spark}</div>
@@ -5913,6 +5985,36 @@ class Handler(BaseHTTPRequestHandler):
                 cookie=clear_user_session_cookie(secure=is_secure_request(self)),
                 status=303,
             )
+            return
+
+        if path == '/user/rule-pack/apply':
+            user, session_kind = get_logged_in_user_context(self)
+            if not user:
+                self.redirect('/user/login')
+                return
+            cfg = load_json(USERS_FILE, {}).get(user)
+            access_error = user_panel_access_error(
+                cfg, session_kind, today=local_now().date(),
+            )
+            if access_error == 'password_change_required':
+                self.redirect('/user/change-password')
+                return
+            if access_error in ('disabled', 'expired'):
+                self.redirect('/user/panel')
+                return
+            if access_error:
+                self.redirect('/user/login')
+                return
+            pack = (form.get('pack') or [''])[0]
+            if pack not in RULE_PACKS:
+                self.redirect('/user/panel?msg=invalid_rule_pack')
+                return
+            # The session is the sole authority for the mutation target. Any
+            # username submitted by a client is deliberately ignored.
+            if not apply_rule_pack_to_user(user, pack):
+                self.redirect('/user/panel?msg=invalid_rule_pack')
+                return
+            self.redirect('/user/panel?msg=rule_pack_applied')
             return
 
         if path.startswith('/panel/') and path.endswith('/rotate-token'):

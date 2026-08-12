@@ -683,6 +683,46 @@ def test_apply_rule_pack_to_user_writes_clash_overrides(tmp_path, monkeypatch):
     assert cfg['clash_tun_route_exclude_address'] == ['202.117.80.11/32']
 
 
+def test_logged_in_user_panel_renders_self_service_rule_packs(tmp_path, monkeypatch):
+    monkeypatch.setattr(ss, 'USAGE_DAILY_FILE', tmp_path / 'usage_daily.json')
+    monkeypatch.setattr(ss, 'ONLINE_FILE', tmp_path / 'online.json')
+    (tmp_path / 'usage_daily.json').write_text('{}')
+    (tmp_path / 'online.json').write_text('{}')
+    cfg = {
+        'sub_token': 'tok',
+        'monthly_quota_bytes': 1 << 30,
+        'max_devices': 2,
+    }
+
+    page = ss.render_user_panel(
+        'h', 'http://h', 'alice', 'tok', cfg, session_auth=True,
+    )
+
+    assert 'action="/user/rule-pack/apply"' in page
+    assert '应用到我的规则' in page
+    assert 'EasyConnect 直连' in page
+    assert 'name="user"' not in page
+
+
+def test_inactive_user_panel_omits_self_service_rule_packs(tmp_path, monkeypatch):
+    monkeypatch.setattr(ss, 'USAGE_DAILY_FILE', tmp_path / 'usage_daily.json')
+    monkeypatch.setattr(ss, 'ONLINE_FILE', tmp_path / 'online.json')
+    (tmp_path / 'usage_daily.json').write_text('{}')
+    (tmp_path / 'online.json').write_text('{}')
+    cfg = {
+        'sub_token': 'tok',
+        'monthly_quota_bytes': 1 << 30,
+        'max_devices': 2,
+        'disabled': True,
+    }
+
+    page = ss.render_user_panel(
+        'h', 'http://h', 'alice', '', cfg, session_auth=True,
+    )
+
+    assert 'action="/user/rule-pack/apply"' not in page
+
+
 def test_admin_row_has_rotate_and_suspend_for_enabled_user(tmp_path, monkeypatch):
     monkeypatch.setattr(ss, 'USAGE_DAILY_FILE', tmp_path / 'usage_daily.json')
     monkeypatch.setattr(ss, 'META_FILE', tmp_path / 'meta.json')

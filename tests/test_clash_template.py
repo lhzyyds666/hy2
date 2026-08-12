@@ -334,6 +334,76 @@ def test_telegram_dns_uses_overseas_resolvers():
         ]
 
 
+def test_domestic_dns_prefers_mainland_resolvers_and_preserves_local_names():
+    cfg = load_template()
+    dns = cfg["dns"]
+    mainland_resolvers = [
+        "223.5.5.5",
+        "119.29.29.29",
+        "https://doh.pub/dns-query",
+        "https://dns.alidns.com/dns-query",
+    ]
+
+    assert dns["cache-algorithm"] == "arc"
+    assert dns["nameserver"] == mainland_resolvers
+    assert dns["direct-nameserver"] == mainland_resolvers
+    assert dns["direct-nameserver-follow-policy"] is False
+    assert dns["nameserver-policy"]["+.cn"] == mainland_resolvers
+    for pattern in (
+        "*.lan",
+        "*.local",
+        "localhost",
+        "+.home.arpa",
+        "+.miwifi.com",
+        "+.tplinkwifi.net",
+        "+.tplogin.cn",
+        "+.router.asus.com",
+    ):
+        assert pattern in dns["fake-ip-filter"]
+
+
+def test_domestic_static_routes_precede_remote_rule_providers():
+    cfg = load_template()
+    rules = cfg["rules"]
+    cn_start = rules.index("DOMAIN-SUFFIX,cn,DIRECT")
+    reject_index = rules.index("RULE-SET,reject,REJECT")
+    direct_ruleset_index = rules.index("RULE-SET,direct,DIRECT")
+    proxy_ruleset_index = rules.index("RULE-SET,proxy,🚀 节点选择")
+    representative_rules = [
+        "DOMAIN-SUFFIX,qq.com,DIRECT",
+        "DOMAIN-SUFFIX,taobao.com,DIRECT",
+        "DOMAIN-SUFFIX,baidu.com,DIRECT",
+        "DOMAIN-SUFFIX,douyin.com,DIRECT",
+        "DOMAIN-SUFFIX,bilibili.com,DIRECT",
+        "DOMAIN-SUFFIX,jd.com,DIRECT",
+        "DOMAIN-SUFFIX,zhihu.com,DIRECT",
+        "DOMAIN-SUFFIX,unionpay.com,DIRECT",
+        "DOMAIN-SUFFIX,aliyuncdn.com,DIRECT",
+        "DOMAIN-SUFFIX,tencentcloudcdn.com,DIRECT",
+    ]
+
+    assert reject_index < cn_start < direct_ruleset_index < proxy_ruleset_index
+    assert rules.index("DOMAIN-SUFFIX,openai.com,🤖 GPT 优化") < cn_start
+    assert rules.index("DOMAIN-SUFFIX,google.com,🌐 Google 优化") < cn_start
+    assert all(rule in rules for rule in representative_rules)
+    assert all(rules.index(rule) < direct_ruleset_index for rule in representative_rules)
+    assert sum(
+        rule.startswith("DOMAIN-SUFFIX,") and rule.endswith(",DIRECT")
+        for rule in rules[cn_start:direct_ruleset_index]
+    ) >= 300
+    assert "DST-PORT,8080,DIRECT" not in rules
+
+
+def test_connection_state_is_reused_for_stability():
+    cfg = load_template()
+
+    assert cfg["tcp-concurrent"] is True
+    assert cfg["profile"] == {
+        "store-selected": True,
+        "store-fake-ip": True,
+    }
+
+
 def test_tcp_vless_nodes_do_not_tunnel_udp():
     cfg = load_template()
     proxies = {proxy["name"]: proxy for proxy in cfg["proxies"]}
