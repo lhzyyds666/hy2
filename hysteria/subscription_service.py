@@ -59,6 +59,7 @@ ONLINE_FILE = Path('/root/hysteria/state/online.json')
 DEVICE_ADMISSIONS_FILE = Path('/root/hysteria/state/device_admissions.json')
 META_FILE = Path('/root/hysteria/subscription_meta.json')
 TEMPLATE_FILE = Path('/root/hysteria/template.yaml')
+TEMPLATE_VERSIONS_FILE = Path('/root/hysteria/state/template_versions.json')
 BACKUP_DIR = Path('/root/hysteria/backups')
 XRAY_CONFIG_FILE = Path('/usr/local/etc/xray/config.json')
 SESSIONS_FILE = Path('/root/hysteria/state/panel_sessions.json')
@@ -1112,6 +1113,10 @@ SUBSCRIPTION_PROFILES = profile_defs.SUBSCRIPTION_PROFILES
 SUBSCRIPTION_PROFILE_ORDER = profile_defs.SUBSCRIPTION_PROFILE_ORDER
 RULE_PACKS = profile_defs.RULE_PACKS
 RULE_PACK_ORDER = profile_defs.RULE_PACK_ORDER
+USER_TEMPLATE_MODE_KEY = profile_defs.USER_TEMPLATE_MODE_KEY
+USER_TEMPLATE_REVISION_KEY = profile_defs.USER_TEMPLATE_REVISION_KEY
+TEMPLATE_MODE_FOLLOW = profile_defs.TEMPLATE_MODE_FOLLOW
+TEMPLATE_MODE_PINNED = profile_defs.TEMPLATE_MODE_PINNED
 
 
 def _subscription_profile_context():
@@ -1119,6 +1124,7 @@ def _subscription_profile_context():
         template_file=TEMPLATE_FILE,
         users_file=USERS_FILE,
         load_json=load_json,
+        template_versions_file=TEMPLATE_VERSIONS_FILE,
     )
 
 
@@ -1137,6 +1143,22 @@ def render_profile_yaml(text, profile):
 def build_yaml(username, auth_secret, profile='default', *, generated_at=None):
     return profile_defs.build_yaml(
         _subscription_profile_context(), username, auth_secret, profile=profile,
+        generated_at=generated_at,
+    )
+
+
+def render_subscription_yaml(
+    username,
+    auth_secret,
+    profile='default',
+    *,
+    generated_at=None,
+):
+    return profile_defs.render_subscription(
+        _subscription_profile_context(),
+        username,
+        auth_secret,
+        profile=profile,
         generated_at=generated_at,
     )
 
@@ -2904,7 +2926,7 @@ def render_subscription_profile_links(base_url, user, token):
         '<div class="import-head">'
         '<div><h2 class="section-title">快速导入</h2>'
         '<div class="small">先选择使用场景，再复制链接到客户端；跨设备时可按需显示二维码。'
-        f'模板更新时间：{html.escape(subscription_template_mtime() or "未知")}。</div></div>'
+        f'通用模板更新时间：{html.escape(subscription_template_mtime() or "未知")}。</div></div>'
         f'<span class="badge" id="profile-selected-badge">{html.escape(default_meta["label"])}</span>'
         '</div>'
         f'<div class="profile-links mt-md" role="group" aria-label="选择订阅模式">{"".join(items)}</div>'
@@ -2929,6 +2951,80 @@ def render_subscription_profile_links(base_url, user, token):
         '</div>'
         '</div>'
     )
+
+
+def render_user_template_controls(cfg):
+    """Render the current user's common-template update policy."""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    status = user_template_sync_status(cfg)
+    mode = status['mode']
+    common_short = status['common_revision'][:10] or '不可用'
+    personal_items = 0
+    for key in (
+        profile_defs.USER_CLASH_RULES_KEY,
+        profile_defs.USER_FAKE_IP_FILTER_KEY,
+        profile_defs.USER_TUN_ROUTE_EXCLUDE_ADDRESS_KEY,
+    ):
+        values = cfg.get(key)
+        if isinstance(values, list):
+            personal_items += len(values)
+
+    if mode == TEMPLATE_MODE_FOLLOW:
+        badge = '<span class="badge">自动跟随</span>'
+        summary = (
+            '当前直接使用最新版通用模板；管理员更新后，你下次更新订阅时自动生效。'
+        )
+        version = f'通用版本 <code>{html.escape(common_short)}</code>'
+        actions = '''
+  <form method="post" action="/user/template-mode" class="inline-form-row mt-md">
+    <input type="hidden" name="action" value="pin">
+    <button class="btn secondary" type="submit">固定当前通用模板</button>
+  </form>'''
+    else:
+        pinned_short = status['pinned_revision'][:10] or '不可用'
+        if status['update_available']:
+            badge = '<span class="badge yellow">有新版可合并</span>'
+            summary = (
+                '你仍在使用固定版本，通用模板的新改动不会自动进入订阅。'
+            )
+            version = (
+                f'固定版本 <code>{html.escape(pinned_short)}</code> · '
+                f'最新通用版 <code>{html.escape(common_short)}</code>'
+            )
+        else:
+            badge = '<span class="badge">固定版本</span>'
+            summary = '当前固定版本与最新版通用模板一致；以后有更新时可手动合并。'
+            version = f'固定版本 <code>{html.escape(pinned_short)}</code>'
+        merge_label = (
+            '合并最新通用模板'
+            if status['update_available']
+            else '重新合并当前通用模板'
+        )
+        merge_action = f'''
+    <form method="post" action="/user/template-mode" class="inline-form-row">
+      <input type="hidden" name="action" value="merge">
+      <button class="btn" type="submit">{merge_label}</button>
+    </form>'''
+        actions = f'''
+  <div class="row gap-sm mt-md">{merge_action}
+    <form method="post" action="/user/template-mode" class="inline-form-row">
+      <input type="hidden" name="action" value="follow">
+      <button class="btn secondary" type="submit">改为自动跟随</button>
+    </form>
+  </div>'''
+
+    return f'''<div class="card mt-md">
+  <div class="row" style="justify-content:space-between;align-items:flex-start;">
+    <div>
+      <h2 class="section-title">通用模板与我的规则</h2>
+      <div class="small">{summary}</div>
+    </div>
+    {badge}
+  </div>
+  <div class="small mt-md">{version} · 个人叠加项 {personal_items} 条</div>
+  {actions}
+  <div class="small faint mt-sm">固定后可继续添加自己的规则；“合并最新通用模板”只更新底板，不会覆盖你的个人规则。</div>
+</div>'''
 
 
 def render_user_rule_pack_controls(cfg):
@@ -2973,7 +3069,7 @@ def render_user_rule_pack_controls(cfg):
   <div class="row" style="justify-content:space-between;align-items:flex-start;">
     <div>
       <h2 class="section-title">我的规则</h2>
-      <div class="small">选择规则包后只会更新你自己的订阅配置，客户端更新订阅后生效。</div>
+      <div class="small">选择规则包后只会更新你自己的叠加层，并应用在上方所选的通用模板底板上；客户端更新订阅后生效。</div>
     </div>
     <span class="badge">自助调整</span>
   </div>
@@ -2985,7 +3081,7 @@ def render_user_rule_pack_controls(cfg):
     </div>
   </form>
   <ul class="small mt-md">{''.join(summaries)}</ul>
-  <div class="small faint mt-sm">重复应用不会重复添加规则；此处不能修改其他用户或全局模板。</div>
+  <div class="small faint mt-sm">重复应用不会重复添加规则；此处不能修改其他用户或通用模板。</div>
 </div>'''
 
 
@@ -3074,6 +3170,10 @@ def render_user_panel(
             '规则包已应用到你的配置，客户端更新订阅后生效。'
         ),
         'invalid_rule_pack': '规则包无效，未修改你的配置。',
+        'template_following': '已改为自动跟随，下一次拉取将使用最新版通用模板，并保留你的个人规则。',
+        'template_pinned': '已固定当前通用模板；以后通用模板更新时，由你决定何时合并。',
+        'template_merged': '已合并最新版通用模板，你的个人规则保持不变。',
+        'invalid_template_action': '模板操作无效，未修改你的配置。',
         'token_rotated': (
             'Token 已重置，旧订阅与面板链接已失效。系统已请求断开'
             '现有 Hysteria 连接，并将在短暂延迟后再次复核；'
@@ -3119,7 +3219,13 @@ def render_user_panel(
         notice_message,
         (
             'flash'
-            if notice_code in ('token_rotated', 'rule_pack_applied')
+            if notice_code in (
+                'token_rotated',
+                'rule_pack_applied',
+                'template_following',
+                'template_pinned',
+                'template_merged',
+            )
             else 'err'
         ),
     )
@@ -3135,6 +3241,11 @@ def render_user_panel(
         import_assistant = render_subscription_profile_links(base_url, user, token)
     rule_pack_controls = (
         render_user_rule_pack_controls(cfg)
+        if session_auth and not inactive
+        else ''
+    )
+    template_controls = (
+        render_user_template_controls(cfg)
         if session_auth and not inactive
         else ''
     )
@@ -3380,6 +3491,7 @@ def render_user_panel(
   <div class="small mt-sm faint">本周期 {cycle_len} 天 · 重置于 {reset_date} · 还剩 {days_left} 天 · 有效期 {html.escape(expiry["label"])}</div>
 </div>
 {import_assistant}
+{template_controls}
 {rule_pack_controls}
 <div class="card mt-md">
   <h2 class="section-title">近 30 天用量趋势</h2>
@@ -4430,7 +4542,7 @@ def replace_template_config(data, expected_revision=None):
 
 
 _CONFIG_FLASH = {
-    'saved': '模板已保存，所有用户下次拉订阅将使用新配置',
+    'saved': '模板已保存；自动跟随用户下次拉订阅即生效，固定版本用户可在面板中选择合并',
     'invalid_json': 'JSON 格式错误，请检查语法',
     'empty': '配置内容不能为空',
     'load_failed': '加载配置文件失败',
@@ -4517,6 +4629,111 @@ def validate_clash_rule(rule):
     return len(parts) >= 3 and bool(parts[1])
 
 
+def _load_template_versions_unlocked():
+    state = load_json(TEMPLATE_VERSIONS_FILE, {}, required=False)
+    if not state:
+        return {'version': 1, 'templates': {}}
+    if (
+        state.get('version') != 1
+        or not isinstance(state.get('templates'), dict)
+    ):
+        raise state_store.InvalidJsonState(
+            f'invalid template snapshot state: {TEMPLATE_VERSIONS_FILE}',
+        )
+    return state
+
+
+def snapshot_current_template():
+    """Persist the current common template once and return its identity."""
+    with template_lock():
+        raw = _template_bytes_unlocked()
+        if not raw:
+            raise TemplateConfigError('template is missing')
+        try:
+            text = raw.decode('utf-8')
+            import yaml
+            data = yaml.safe_load(text)
+        except Exception as exc:
+            raise TemplateConfigError('template YAML is invalid') from exc
+        if not validate_template_config(data):
+            raise TemplateConfigError('template schema is invalid')
+
+        revision = hashlib.sha256(raw).hexdigest()
+        template_mtime = profile_defs.template_mtime_iso(TEMPLATE_FILE)
+        state = _load_template_versions_unlocked()
+        templates = state['templates']
+        existing = templates.get(revision)
+        if existing is not None:
+            if (
+                not isinstance(existing, dict)
+                or existing.get('yaml') != text
+            ):
+                raise state_store.InvalidJsonState(
+                    f'template snapshot hash mismatch: {TEMPLATE_VERSIONS_FILE}',
+                )
+        else:
+            templates[revision] = {
+                'yaml': text,
+                'created_at': profile_defs.utc_now_iso(),
+                'template_mtime': template_mtime,
+            }
+            save_json(TEMPLATE_VERSIONS_FILE, state)
+        return {
+            'revision': revision,
+            'template_mtime': template_mtime,
+        }
+
+
+def user_template_sync_status(cfg):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    mode = profile_defs.normalize_user_template_mode(cfg)
+    pinned_revision = str(
+        cfg.get(USER_TEMPLATE_REVISION_KEY) or '',
+    ).lower()
+    # Template replacement is atomic, so this read observes either the old or
+    # new complete file without taking a mutation lock during page rendering.
+    raw = _template_bytes_unlocked()
+    common_revision = hashlib.sha256(raw).hexdigest() if raw else ''
+    return {
+        'mode': mode,
+        'common_revision': common_revision,
+        'pinned_revision': pinned_revision if mode == TEMPLATE_MODE_PINNED else '',
+        'update_available': bool(
+            mode == TEMPLATE_MODE_PINNED
+            and pinned_revision != common_revision
+        ),
+    }
+
+
+def set_user_template_mode(username, action):
+    """Change one user's base-template policy without touching their overlays."""
+    username = str(username or '').strip()
+    action = str(action or '').strip().lower()
+    if not username or action not in ('follow', 'pin', 'merge'):
+        return False
+
+    snapshot = None
+    if action in ('pin', 'merge'):
+        # Capture first, then mutate users.json. No lock is nested with
+        # usage_lock(), which preserves the service's global lock ordering.
+        snapshot = snapshot_current_template()
+
+    with usage_lock():
+        users = load_json(USERS_FILE, {})
+        cfg = users.get(username)
+        if not isinstance(cfg, dict):
+            return False
+        if action == 'follow':
+            cfg[USER_TEMPLATE_MODE_KEY] = TEMPLATE_MODE_FOLLOW
+            cfg.pop(USER_TEMPLATE_REVISION_KEY, None)
+        else:
+            cfg[USER_TEMPLATE_MODE_KEY] = TEMPLATE_MODE_PINNED
+            cfg[USER_TEMPLATE_REVISION_KEY] = snapshot['revision']
+        users[username] = cfg
+        save_json(USERS_FILE, users)
+    return True
+
+
 def render_config_editor(
     host,
     flash='',
@@ -4574,12 +4791,12 @@ def render_config_editor(
     )
     content = f'''{alert}
 <div class="card mb-md">
-  <div class="small mb-sm">编辑订阅模板（JSON 格式）。保存后所有用户下次拉订阅即获得新配置，每个用户的密码和 UUID 由服务端从 users.json 自动注入。</div>
+  <div class="small mb-sm">编辑通用订阅模板（JSON 格式）。保存后，自动跟随用户下次拉订阅即获得新配置；固定版本用户会在面板看到新版提示并自行合并。每个用户的密码和 UUID 仍由服务端从 users.json 自动注入。</div>
   <div class="small">模板文件：<code>{html.escape(str(TEMPLATE_FILE))}</code></div>
 </div>
 <div class="card">
   <form method="post" action="/admin/config/save" id="configForm"
-        data-confirm="保存后所有用户下次拉取订阅都会使用这份模板，确认覆盖？">
+        data-confirm="保存后自动跟随用户会使用这份模板，固定版本用户可稍后自行合并，确认覆盖？">
     <input type="hidden" name="template_revision" value="{html.escape(template_revision, quote=True)}">
     <label for="configEditor" class="k">模板 JSON</label>
     <div id="configEditorHelp" class="field-help mb-sm">Tab 插入两个空格；按 Esc 后再按 Tab 可移出编辑器，Shift+Tab 可直接返回上一个控件。</div>
@@ -4945,7 +5162,7 @@ def render_rules(
     <div class="grid grid-3">
       <div><label for="rule-pack">规则包</label><select id="rule-pack" name="pack">{pack_options}</select></div>
       <div><label for="rule-pack-scope">应用范围</label><select id="rule-pack-scope" name="scope">
-        <option value="global">全局模板</option>
+        <option value="global">通用模板</option>
         <option value="user">单个用户</option>
       </select></div>
       <div><label for="rule-pack-user">用户（选择“单个用户”时生效）</label><select id="rule-pack-user" name="user" disabled>
@@ -4954,7 +5171,7 @@ def render_rules(
     </div>
     <button class="btn secondary mt-md" type="submit">应用规则包</button>
   </form>
-  <div class="small mt-sm faint">全局模板影响所有用户；单个用户会写入 users.json 的个人 Clash 覆盖项。</div>
+  <div class="small mt-sm faint">通用模板会立即进入自动跟随用户；固定版本用户可在自己的面板中稍后合并。单个用户规则仍作为独立 Clash 覆盖项保存。</div>
 </div>
 <div class="card scroll-x" tabindex="0" aria-label="路由规则，可横向滚动" style="padding:0;overflow:hidden;">
   <table class="table"><thead><tr><th style="padding-left:18px;width:50px;">#</th><th>类型</th><th>匹配</th><th>动作</th><th style="padding-right:18px;width:90px;">操作</th></tr></thead>
@@ -4993,9 +5210,9 @@ def render_rules(
   <details>
     <summary>直接编辑全部规则</summary>
     <form method="post" action="/admin/rules/raw" class="inline-form mt-md"
-          data-confirm="保存会替换全部共享路由规则，并影响所有用户订阅，确认继续？">
+          data-confirm="保存会替换全部通用路由规则；自动跟随用户立即采用，固定版本用户可稍后合并，确认继续？">
       <input type="hidden" name="template_revision" value="{html.escape(submitted_revision, quote=True)}">
-      <div class="small mb-sm">每行一条规则，格式：<code>TYPE,匹配值,动作</code>。保存后同步到所有订阅模板。</div>
+      <div class="small mb-sm">每行一条规则，格式：<code>TYPE,匹配值,动作</code>。保存后更新通用模板；固定版本用户可稍后自行合并。</div>
       <label for="rules-raw" class="sr-only">全部路由规则</label>
       <textarea id="rules-raw" name="rules_raw" class="code-area code-med">{rules_text}</textarea>
       <div class="row mt-md">
@@ -5512,10 +5729,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             profile = normalize_subscription_profile((q.get('profile') or ['default'])[0])
             generated_at = profile_defs.utc_now_iso()
-            template_mtime = subscription_template_mtime()
-            yml = build_yaml(
-                user, str(cfg.get('sub_token') or ''),
-                profile=profile, generated_at=generated_at)
+            try:
+                rendered = render_subscription_yaml(
+                    user,
+                    str(cfg.get('sub_token') or ''),
+                    profile=profile,
+                    generated_at=generated_at,
+                )
+            except profile_defs.PinnedTemplateUnavailable:
+                self.send_response_body(
+                    503,
+                    '固定模板版本暂不可用，请登录用户面板合并最新版通用模板。',
+                    'text/plain; charset=utf-8',
+                    send_payload,
+                )
+                return
+            yml = rendered.text
             tx, rx, used = scaled_usage_for_user(user)
             total = user_total_quota(cfg)
             filename = f'{user}.yaml' if profile == 'default' else f'{user}-{profile}.yaml'
@@ -5525,7 +5754,9 @@ class Handler(BaseHTTPRequestHandler):
                     'Content-Disposition': f"attachment; filename*=UTF-8''{filename}",
                     'x-subscription-profile': profile,
                     'x-subscription-generated-at': generated_at,
-                    'x-subscription-template-mtime': template_mtime,
+                    'x-subscription-template-mtime': rendered.template_mtime,
+                    'x-subscription-template-mode': rendered.template_mode,
+                    'x-subscription-template-revision': rendered.template_revision,
                     'profile-update-interval': '24',
                     'subscription-userinfo': (
                         f'upload={tx}; download={rx}; total={total}; expire=0'
@@ -6015,6 +6246,49 @@ class Handler(BaseHTTPRequestHandler):
                 self.redirect('/user/panel?msg=invalid_rule_pack')
                 return
             self.redirect('/user/panel?msg=rule_pack_applied')
+            return
+
+        if path == '/user/template-mode':
+            user, session_kind = get_logged_in_user_context(self)
+            if not user:
+                self.redirect('/user/login')
+                return
+            cfg = load_json(USERS_FILE, {}).get(user)
+            access_error = user_panel_access_error(
+                cfg, session_kind, today=local_now().date(),
+            )
+            if access_error == 'password_change_required':
+                self.redirect('/user/change-password')
+                return
+            if access_error in ('disabled', 'expired'):
+                self.redirect('/user/panel')
+                return
+            if access_error:
+                self.redirect('/user/login')
+                return
+            action = (form.get('action') or [''])[0]
+            messages = {
+                'follow': 'template_following',
+                'pin': 'template_pinned',
+                'merge': 'template_merged',
+            }
+            if action not in messages:
+                self.redirect('/user/panel?msg=invalid_template_action')
+                return
+            try:
+                changed = set_user_template_mode(user, action)
+            except TemplateConfigError:
+                self.send_response_body(
+                    503,
+                    '通用模板当前不可用，未修改你的模板选择。',
+                    'text/plain; charset=utf-8',
+                    True,
+                )
+                return
+            if not changed:
+                self.redirect('/user/login')
+                return
+            self.redirect(f'/user/panel?msg={messages[action]}')
             return
 
         if path.startswith('/panel/') and path.endswith('/rotate-token'):

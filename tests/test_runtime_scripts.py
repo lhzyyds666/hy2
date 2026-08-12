@@ -1,5 +1,6 @@
 import fcntl
 import hashlib
+import json
 import os
 import subprocess
 import tarfile
@@ -62,6 +63,9 @@ def test_backup_excludes_live_login_sessions(tmp_path):
     (state_dir / 'credential_revocations.json').write_text(
         '{"task":{"user":"alice"}}',
     )
+    (state_dir / 'template_versions.json').write_text(
+        '{"version":1,"templates":{}}',
+    )
 
     env = isolated_backup_env(tmp_path, hy_dir)
     result = subprocess.run(
@@ -78,6 +82,7 @@ def test_backup_excludes_live_login_sessions(tmp_path):
 
     assert any(name.endswith('/users.json') for name in names)
     assert any(name.endswith('/state/usage.json') for name in names)
+    assert any(name.endswith('/state/template_versions.json') for name in names)
     assert not any(name.endswith('/state/panel_sessions.json') for name in names)
     assert not any(name.endswith('/state/user_panel_sessions.json') for name in names)
     assert not any(
@@ -98,6 +103,18 @@ def test_restore_check_accepts_plain_backup_archive(tmp_path):
     (hy_dir / 'subscription_meta.json').write_text('{}')
     (hy_dir / 'template.yaml').write_text('proxies: []\nrules: []\n')
     (state_dir / 'usage.json').write_text('{}')
+    snapshot_text = 'proxies: []\nproxy-groups: []\nrules: []\n'
+    snapshot_revision = hashlib.sha256(snapshot_text.encode()).hexdigest()
+    (state_dir / 'template_versions.json').write_text(json.dumps({
+        'version': 1,
+        'templates': {
+            snapshot_revision: {
+                'yaml': snapshot_text,
+                'created_at': '2026-08-12T00:00:00Z',
+                'template_mtime': '2026-08-12T00:00:00Z',
+            },
+        },
+    }))
 
     env = isolated_backup_env(tmp_path, hy_dir)
     archive = subprocess.run(
@@ -118,6 +135,43 @@ def test_restore_check_accepts_plain_backup_archive(tmp_path):
 
     assert 'OK: hy2 backup dry-run passed' in result.stdout
     assert 'would_overwrite=' in result.stdout
+
+
+def test_restore_check_rejects_corrupt_template_snapshot(tmp_path):
+    hy_dir = tmp_path / 'hysteria'
+    state_dir = hy_dir / 'state'
+    state_dir.mkdir(parents=True)
+    (hy_dir / 'users.json').write_text('{}')
+    (hy_dir / 'subscription_meta.json').write_text('{}')
+    (state_dir / 'template_versions.json').write_text(json.dumps({
+        'version': 1,
+        'templates': {
+            'a' * 64: {
+                'yaml': 'rules: []\n',
+                'created_at': '2026-08-12T00:00:00Z',
+                'template_mtime': '2026-08-12T00:00:00Z',
+            },
+        },
+    }))
+    env = isolated_backup_env(tmp_path, hy_dir)
+    archive = subprocess.run(
+        ['bash', str(ROOT / 'scripts/hy2-backup.sh')],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    ).stdout.strip()
+
+    result = subprocess.run(
+        ['bash', str(ROOT / 'scripts/hy2-restore-check.sh'), archive],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert 'template_versions.json contains an invalid snapshot' in result.stderr
 
 
 def test_backup_encryption_and_restore_check(tmp_path):

@@ -1,6 +1,7 @@
 """Concurrency and unlimited-device regressions for operator forms."""
 
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from http.server import ThreadingHTTPServer
 import hashlib
@@ -72,6 +73,11 @@ def _seed(tmp_path, monkeypatch, users):
         encoding="utf-8",
     )
     monkeypatch.setattr(ss, "TEMPLATE_FILE", template)
+    monkeypatch.setattr(
+        ss,
+        "TEMPLATE_VERSIONS_FILE",
+        tmp_path / "template_versions.json",
+    )
     monkeypatch.setattr(ss, "USAGE_LOCK_FILE", tmp_path / "usage.lock")
     monkeypatch.setattr(ss, "TEMPLATE_LOCK_FILE", tmp_path / "template.lock")
     monkeypatch.setattr(ss, "local_now", lambda: NOW)
@@ -356,3 +362,43 @@ def test_rule_compare_and_swap_accepts_unicode_rule_values(
         expected_rule="DOMAIN,unicode.example,🚀 节点选择",
     )
     assert ss.load_template_rules() == []
+
+
+def test_user_pin_racing_common_update_always_references_complete_snapshot(
+    tmp_path,
+    monkeypatch,
+):
+    paths, _template = _seed(
+        tmp_path,
+        monkeypatch,
+        {
+            "alice": {
+                "sub_token": "token",
+                "monthly_quota_bytes": 1 << 30,
+                "max_devices": 2,
+            },
+        },
+    )
+    updated = {
+        "proxies": [],
+        "proxy-groups": [],
+        "rules": ["DOMAIN,updated.example,DIRECT"],
+    }
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pin_future = pool.submit(ss.set_user_template_mode, "alice", "pin")
+        update_future = pool.submit(ss.replace_template_config, updated)
+        assert pin_future.result(timeout=3) is True
+        update_future.result(timeout=3)
+
+    user = json.loads(paths["USERS_FILE"].read_text(encoding="utf-8"))["alice"]
+    revision = user[ss.USER_TEMPLATE_REVISION_KEY]
+    snapshots = json.loads(
+        ss.TEMPLATE_VERSIONS_FILE.read_text(encoding="utf-8"),
+    )
+    snapshot_text = snapshots["templates"][revision]["yaml"]
+    assert hashlib.sha256(snapshot_text.encode("utf-8")).hexdigest() == revision
+    assert (
+        "first.example" in snapshot_text
+        or "updated.example" in snapshot_text
+    )

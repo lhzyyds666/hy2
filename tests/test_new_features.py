@@ -683,11 +683,124 @@ def test_apply_rule_pack_to_user_writes_clash_overrides(tmp_path, monkeypatch):
     assert cfg['clash_tun_route_exclude_address'] == ['202.117.80.11/32']
 
 
+def _write_user_base_template(path, domain):
+    path.write_text(
+        yaml.dump(
+            {
+                'proxies': [
+                    {
+                        'name': 'test-node',
+                        'type': 'socks5',
+                        'server': '127.0.0.1',
+                        'port': 1080,
+                    },
+                ],
+                'proxy-groups': [
+                    {
+                        'name': ss.NODE_GROUP,
+                        'type': 'select',
+                        'proxies': ['test-node', 'DIRECT'],
+                    },
+                ],
+                'rules': [f'DOMAIN,{domain},DIRECT', 'MATCH,DIRECT'],
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding='utf-8',
+    )
+
+
+def _configure_user_template_files(tmp_path, monkeypatch):
+    template = tmp_path / 'template.yaml'
+    users_file = tmp_path / 'users.json'
+    versions_file = tmp_path / 'state' / 'template_versions.json'
+    _write_user_base_template(template, 'old-common.example')
+    users_file.write_text(json.dumps({
+        'alice': {
+            'sub_token': 'tok',
+            'clash_rules': ['DOMAIN,my-rule.example,DIRECT'],
+        },
+    }), encoding='utf-8')
+    monkeypatch.setattr(ss, 'TEMPLATE_FILE', template)
+    monkeypatch.setattr(ss, 'TEMPLATE_VERSIONS_FILE', versions_file)
+    monkeypatch.setattr(ss, 'TEMPLATE_LOCK_FILE', tmp_path / 'template.lock')
+    monkeypatch.setattr(ss, 'USERS_FILE', users_file)
+    monkeypatch.setattr(ss, 'USAGE_LOCK_FILE', tmp_path / 'usage.lock')
+    return template, users_file, versions_file
+
+
+def test_user_can_pin_then_merge_common_template_without_losing_rules(
+    tmp_path, monkeypatch,
+):
+    template, users_file, versions_file = _configure_user_template_files(
+        tmp_path, monkeypatch,
+    )
+
+    assert ss.set_user_template_mode('alice', 'pin') is True
+    pinned_user = json.loads(users_file.read_text(encoding='utf-8'))['alice']
+    old_revision = pinned_user[ss.USER_TEMPLATE_REVISION_KEY]
+    assert pinned_user[ss.USER_TEMPLATE_MODE_KEY] == ss.TEMPLATE_MODE_PINNED
+    snapshots = json.loads(versions_file.read_text(encoding='utf-8'))
+    assert snapshots['templates'][old_revision]['yaml']
+
+    _write_user_base_template(template, 'new-common.example')
+    pinned_cfg = yaml.safe_load(ss.build_yaml('alice', 'tok'))
+    assert 'DOMAIN,old-common.example,DIRECT' in pinned_cfg['rules']
+    assert 'DOMAIN,new-common.example,DIRECT' not in pinned_cfg['rules']
+    assert pinned_cfg['rules'][0] == 'DOMAIN,my-rule.example,DIRECT'
+
+    assert ss.set_user_template_mode('alice', 'merge') is True
+    merged_user = json.loads(users_file.read_text(encoding='utf-8'))['alice']
+    assert merged_user[ss.USER_TEMPLATE_REVISION_KEY] != old_revision
+    assert merged_user['clash_rules'] == ['DOMAIN,my-rule.example,DIRECT']
+    merged_cfg = yaml.safe_load(ss.build_yaml('alice', 'tok'))
+    assert 'DOMAIN,new-common.example,DIRECT' in merged_cfg['rules']
+    assert 'DOMAIN,old-common.example,DIRECT' not in merged_cfg['rules']
+    assert merged_cfg['rules'][0] == 'DOMAIN,my-rule.example,DIRECT'
+
+
+def test_user_can_return_to_follow_mode(tmp_path, monkeypatch):
+    template, users_file, _versions_file = _configure_user_template_files(
+        tmp_path, monkeypatch,
+    )
+    assert ss.set_user_template_mode('alice', 'pin') is True
+    _write_user_base_template(template, 'latest-common.example')
+
+    assert ss.set_user_template_mode('alice', 'follow') is True
+
+    user_cfg = json.loads(users_file.read_text(encoding='utf-8'))['alice']
+    assert user_cfg[ss.USER_TEMPLATE_MODE_KEY] == ss.TEMPLATE_MODE_FOLLOW
+    assert ss.USER_TEMPLATE_REVISION_KEY not in user_cfg
+    rendered = ss.render_subscription_yaml('alice', 'tok')
+    cfg = yaml.safe_load(rendered.text)
+    assert rendered.template_mode == ss.TEMPLATE_MODE_FOLLOW
+    assert 'DOMAIN,latest-common.example,DIRECT' in cfg['rules']
+    assert cfg['rules'][0] == 'DOMAIN,my-rule.example,DIRECT'
+
+
+def test_missing_pinned_snapshot_does_not_fall_back_to_common(
+    tmp_path, monkeypatch,
+):
+    _template, users_file, _versions_file = _configure_user_template_files(
+        tmp_path, monkeypatch,
+    )
+    users = json.loads(users_file.read_text(encoding='utf-8'))
+    users['alice'][ss.USER_TEMPLATE_MODE_KEY] = ss.TEMPLATE_MODE_PINNED
+    users['alice'][ss.USER_TEMPLATE_REVISION_KEY] = 'a' * 64
+    users_file.write_text(json.dumps(users), encoding='utf-8')
+
+    with pytest.raises(ss.profile_defs.PinnedTemplateUnavailable):
+        ss.build_yaml('alice', 'tok')
+
+
 def test_logged_in_user_panel_renders_self_service_rule_packs(tmp_path, monkeypatch):
     monkeypatch.setattr(ss, 'USAGE_DAILY_FILE', tmp_path / 'usage_daily.json')
     monkeypatch.setattr(ss, 'ONLINE_FILE', tmp_path / 'online.json')
+    monkeypatch.setattr(ss, 'TEMPLATE_FILE', tmp_path / 'template.yaml')
     (tmp_path / 'usage_daily.json').write_text('{}')
     (tmp_path / 'online.json').write_text('{}')
+    (tmp_path / 'template.yaml').write_text('rules: []\n')
     cfg = {
         'sub_token': 'tok',
         'monthly_quota_bytes': 1 << 30,
@@ -702,6 +815,35 @@ def test_logged_in_user_panel_renders_self_service_rule_packs(tmp_path, monkeypa
     assert '应用到我的规则' in page
     assert 'EasyConnect 直连' in page
     assert 'name="user"' not in page
+    assert 'action="/user/template-mode"' in page
+    assert '固定当前通用模板' in page
+    assert '只更新底板，不会覆盖你的个人规则' in page
+
+
+def test_pinned_user_panel_offers_common_template_merge(tmp_path, monkeypatch):
+    monkeypatch.setattr(ss, 'USAGE_DAILY_FILE', tmp_path / 'usage_daily.json')
+    monkeypatch.setattr(ss, 'ONLINE_FILE', tmp_path / 'online.json')
+    monkeypatch.setattr(ss, 'TEMPLATE_FILE', tmp_path / 'template.yaml')
+    (tmp_path / 'usage_daily.json').write_text('{}')
+    (tmp_path / 'online.json').write_text('{}')
+    (tmp_path / 'template.yaml').write_text('rules: []\n')
+    cfg = {
+        'sub_token': 'tok',
+        'monthly_quota_bytes': 1 << 30,
+        'max_devices': 2,
+        ss.USER_TEMPLATE_MODE_KEY: ss.TEMPLATE_MODE_PINNED,
+        ss.USER_TEMPLATE_REVISION_KEY: 'a' * 64,
+        'clash_rules': ['DOMAIN,my-rule.example,DIRECT'],
+    }
+
+    page = ss.render_user_panel(
+        'h', 'http://h', 'alice', 'tok', cfg, session_auth=True,
+    )
+
+    assert '有新版可合并' in page
+    assert 'name="action" value="merge"' in page
+    assert '合并最新通用模板' in page
+    assert '个人叠加项 1 条' in page
 
 
 def test_inactive_user_panel_omits_self_service_rule_packs(tmp_path, monkeypatch):
@@ -721,6 +863,7 @@ def test_inactive_user_panel_omits_self_service_rule_packs(tmp_path, monkeypatch
     )
 
     assert 'action="/user/rule-pack/apply"' not in page
+    assert 'action="/user/template-mode"' not in page
 
 
 def test_admin_row_has_rotate_and_suspend_for_enabled_user(tmp_path, monkeypatch):
@@ -846,6 +989,8 @@ def test_build_yaml_prepends_subscription_metadata(tmp_path, monkeypatch):
                          generated_at='2026-06-22T16:00:00Z')
 
     assert text.startswith('# hy2-generated-at: 2026-06-22T16:00:00Z')
+    assert '# hy2-template-mode: follow' in text
+    assert '# hy2-template-revision: ' in text
     assert '# hy2-user: alice' in text
     assert '# hy2-profile: work' in text
     assert yaml.safe_load(text)['proxies'][0]['password'] == 'alice:tok'

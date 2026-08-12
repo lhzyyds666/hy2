@@ -79,6 +79,30 @@ def _write_json(path, value):
     target.write_text(json.dumps(value), encoding="utf-8")
 
 
+def _write_valid_template(path, domain):
+    Path(path).write_text(
+        json.dumps({
+            "proxies": [
+                {
+                    "name": "test-node",
+                    "type": "socks5",
+                    "server": "127.0.0.1",
+                    "port": 1080,
+                },
+            ],
+            "proxy-groups": [
+                {
+                    "name": ss.NODE_GROUP,
+                    "type": "select",
+                    "proxies": ["test-node", "DIRECT"],
+                },
+            ],
+            "rules": [f"DOMAIN,{domain},DIRECT", "MATCH,DIRECT"],
+        }),
+        encoding="utf-8",
+    )
+
+
 def _configure_state(tmp_path, monkeypatch, *, users=None):
     paths = {
         "USERS_FILE": tmp_path / "users.json",
@@ -93,6 +117,11 @@ def _configure_state(tmp_path, monkeypatch, *, users=None):
         "DEVICE_ADMISSIONS_FILE": tmp_path / "device_admissions.json",
         "RESET_LOG_FILE": tmp_path / "usage_reset.log",
         "USAGE_LOCK_FILE": tmp_path / "usage.lock",
+        "TEMPLATE_FILE": tmp_path / "template.yaml",
+        "TEMPLATE_LOCK_FILE": tmp_path / "template.lock",
+        "TEMPLATE_VERSIONS_FILE": (
+            tmp_path / "template_versions.json"
+        ),
         "DISPLAY_MULTIPLIER_STATE_FILE": (
             tmp_path / "display_multiplier.json"
         ),
@@ -505,6 +534,162 @@ def test_user_rule_pack_post_requires_an_active_user_session(
     assert logged_out.status == 302
     assert logged_out.headers["location"] == "/user/login"
     assert "clash_rules" not in user
+
+
+def test_user_template_choice_is_session_scoped_and_merge_preserves_rules(
+    tmp_path, monkeypatch,
+):
+    state = _configure_state(
+        tmp_path,
+        monkeypatch,
+        users={
+            "alice": {
+                "sub_token": "alice-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+                "clash_rules": ["DOMAIN,my-rule.example,DIRECT"],
+            },
+            "bob": {
+                "sub_token": "bob-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+            },
+        },
+    )
+    _write_valid_template(state["TEMPLATE_FILE"], "old-common.example")
+    sid = _seed_token_session(
+        state, user="alice", token="alice-token", sid="alice-session",
+    )
+
+    with _running_server() as server:
+        pinned = _request(
+            server,
+            "POST",
+            "/user/template-mode",
+            form={"action": "pin", "user": "bob"},
+            headers={"Cookie": f"usid={sid}"},
+        )
+        users = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))
+        old_revision = users["alice"][ss.USER_TEMPLATE_REVISION_KEY]
+        _write_valid_template(state["TEMPLATE_FILE"], "new-common.example")
+        before_merge = _request(
+            server,
+            "GET",
+            "/sub/alice?token=alice-token",
+        )
+        merged = _request(
+            server,
+            "POST",
+            "/user/template-mode",
+            form={"action": "merge"},
+            headers={"Cookie": f"usid={sid}"},
+        )
+        after_merge = _request(
+            server,
+            "GET",
+            "/sub/alice?token=alice-token",
+        )
+
+    users = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))
+    assert pinned.status == 302
+    assert pinned.headers["location"] == "/user/panel?msg=template_pinned"
+    assert users["alice"][ss.USER_TEMPLATE_MODE_KEY] == ss.TEMPLATE_MODE_PINNED
+    assert users["alice"][ss.USER_TEMPLATE_REVISION_KEY] != old_revision
+    assert users["alice"]["clash_rules"] == [
+        "DOMAIN,my-rule.example,DIRECT",
+    ]
+    assert ss.USER_TEMPLATE_MODE_KEY not in users["bob"]
+    snapshots = json.loads(
+        state["TEMPLATE_VERSIONS_FILE"].read_text(encoding="utf-8"),
+    )
+    assert old_revision in snapshots["templates"]
+    assert len(snapshots["templates"]) == 2
+
+    assert before_merge.status == 200
+    assert before_merge.headers["x-subscription-template-mode"] == "pinned"
+    assert before_merge.headers["x-subscription-template-revision"] == old_revision
+    assert b"old-common.example" in before_merge.body
+    assert b"new-common.example" not in before_merge.body
+    assert b"my-rule.example" in before_merge.body
+    assert merged.status == 302
+    assert merged.headers["location"] == "/user/panel?msg=template_merged"
+    assert after_merge.status == 200
+    assert after_merge.headers["x-subscription-template-mode"] == "pinned"
+    assert b"new-common.example" in after_merge.body
+    assert b"old-common.example" not in after_merge.body
+    assert b"my-rule.example" in after_merge.body
+
+
+def test_user_template_choice_requires_an_active_session(tmp_path, monkeypatch):
+    state = _configure_state(
+        tmp_path,
+        monkeypatch,
+        users={
+            "alice": {
+                "sub_token": "alice-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+                "disabled": True,
+            },
+        },
+    )
+    _write_valid_template(state["TEMPLATE_FILE"], "common.example")
+    sid = _seed_token_session(
+        state, user="alice", token="alice-token", sid="alice-session",
+    )
+
+    with _running_server() as server:
+        inactive = _request(
+            server,
+            "POST",
+            "/user/template-mode",
+            form={"action": "pin"},
+            headers={"Cookie": f"usid={sid}"},
+        )
+        logged_out = _request(
+            server,
+            "POST",
+            "/user/template-mode",
+            form={"action": "pin"},
+        )
+
+    user = json.loads(state["USERS_FILE"].read_text(encoding="utf-8"))["alice"]
+    assert inactive.status == 302
+    assert inactive.headers["location"] == "/user/panel"
+    assert logged_out.status == 302
+    assert logged_out.headers["location"] == "/user/login"
+    assert ss.USER_TEMPLATE_MODE_KEY not in user
+    assert not state["TEMPLATE_VERSIONS_FILE"].exists()
+
+
+def test_subscription_fails_closed_when_pinned_snapshot_is_missing(
+    tmp_path, monkeypatch,
+):
+    state = _configure_state(
+        tmp_path,
+        monkeypatch,
+        users={
+            "alice": {
+                "sub_token": "alice-token",
+                "monthly_quota_bytes": 1024,
+                "max_devices": 2,
+                ss.USER_TEMPLATE_MODE_KEY: ss.TEMPLATE_MODE_PINNED,
+                ss.USER_TEMPLATE_REVISION_KEY: "a" * 64,
+            },
+        },
+    )
+    _write_valid_template(state["TEMPLATE_FILE"], "must-not-leak.example")
+
+    with _running_server() as server:
+        response = _request(
+            server,
+            "GET",
+            "/sub/alice?token=alice-token",
+        )
+
+    assert response.status == 503
+    assert "固定模板版本暂不可用".encode("utf-8") in response.body
+    assert b"must-not-leak.example" not in response.body
 
 
 @pytest.mark.parametrize(
