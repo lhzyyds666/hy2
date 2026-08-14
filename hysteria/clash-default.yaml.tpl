@@ -408,16 +408,12 @@ proxy-groups:
       - 🇺🇸 美国 UDP TUIC
 
   - name: ✈️ Telegram 优化
-    type: url-test
+    type: select
     proxies:
       - 🇺🇸 美国 UDP (端口跳跃)
       - 🇺🇸 美国 UDP TUIC
       - 🇺🇸 美国 TCP (VLESS+REALITY)
       - 🇺🇸 美国 TCP 备用 (VLESS+REALITY)
-    url: https://telegram.org/img/website_icon.svg
-    interval: 60
-    timeout: 5000
-    tolerance: 100
 
 # 5. 规则集（每天自动更新）
 rule-providers:

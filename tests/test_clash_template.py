@@ -68,18 +68,21 @@ def test_academic_access_group_defaults_to_direct():
     assert "📚 学术访问" in groups["🚀 节点选择"]["proxies"]
 
 
-def test_telegram_uses_dedicated_url_test_group():
+def test_telegram_uses_manual_select_with_hysteria2_as_default():
     cfg = load_template()
     groups = {group["name"]: group for group in cfg["proxy-groups"]}
 
     telegram_group = groups["✈️ Telegram 优化"]
-    assert telegram_group["type"] == "url-test"
-    assert telegram_group["url"] == "https://telegram.org/img/website_icon.svg"
-    assert telegram_group["proxies"][:2] == [
-        "🇺🇸 美国 UDP (端口跳跃)",
-        "🇺🇸 美国 UDP TUIC",
-    ]
-    assert "🇺🇸 美国 TCP (VLESS+REALITY)" in telegram_group["proxies"]
+    assert telegram_group == {
+        "name": "✈️ Telegram 优化",
+        "type": "select",
+        "proxies": [
+            "🇺🇸 美国 UDP (端口跳跃)",
+            "🇺🇸 美国 UDP TUIC",
+            "🇺🇸 美国 TCP (VLESS+REALITY)",
+            "🇺🇸 美国 TCP 备用 (VLESS+REALITY)",
+        ],
+    }
     assert "✈️ Telegram 优化" in groups["🚀 节点选择"]["proxies"]
 
 
@@ -273,9 +276,16 @@ def test_telegram_rules_precede_general_rulesets():
 
     assert telegram_domain_indexes
     assert max(telegram_domain_indexes) < first_ruleset
-    assert "DOMAIN-SUFFIX,telegram.org,✈️ Telegram 优化" in rules
-    assert "DOMAIN-SUFFIX,t.me,✈️ Telegram 优化" in rules
-    assert "RULE-SET,telegramcidr,✈️ Telegram 优化,no-resolve" in rules
+    expected_telegram_rules = [
+        "DOMAIN-SUFFIX,telegram.org,✈️ Telegram 优化",
+        "DOMAIN-SUFFIX,telegram.me,✈️ Telegram 优化",
+        "DOMAIN-SUFFIX,telegram.dog,✈️ Telegram 优化",
+        "DOMAIN-SUFFIX,t.me,✈️ Telegram 优化",
+        "DOMAIN-SUFFIX,telegra.ph,✈️ Telegram 优化",
+        "DOMAIN-SUFFIX,tdesktop.com,✈️ Telegram 优化",
+        "RULE-SET,telegramcidr,✈️ Telegram 优化,no-resolve",
+    ]
+    assert all(rule in rules for rule in expected_telegram_rules)
     assert not any("telegram" in rule.lower() and rule.endswith(",DIRECT") for rule in rules)
 
 
