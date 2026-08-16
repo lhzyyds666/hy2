@@ -54,6 +54,29 @@ def test_template_contains_no_bare_foreign_doh_or_dot():
     assert "tls://8.8.8.8" not in text
 
 
+def test_hysteria2_uses_fixed_udp_443_without_port_hopping():
+    cfg = load_template()
+    proxies = {proxy["name"]: proxy for proxy in cfg["proxies"]}
+    hysteria2 = proxies["🇺🇸 美国 UDP 443"]
+
+    assert hysteria2["type"] == "hysteria2"
+    assert hysteria2["port"] == 443
+    assert hysteria2["udp"] is True
+    assert hysteria2["up"] == "100 Mbps"
+    assert hysteria2["down"] == "400 Mbps"
+    assert "ports" not in hysteria2
+    assert "transport" not in hysteria2
+    assert "🇺🇸 美国 UDP (端口跳跃)" not in proxies
+
+    group_members = [
+        member
+        for group in cfg["proxy-groups"]
+        for member in group["proxies"]
+    ]
+    assert "🇺🇸 美国 UDP 443" in group_members
+    assert "🇺🇸 美国 UDP (端口跳跃)" not in group_members
+
+
 def test_github_uses_dedicated_url_test_group():
     cfg = load_template()
     groups = {group["name"]: group for group in cfg["proxy-groups"]}
@@ -72,7 +95,7 @@ def test_gpt_uses_dedicated_url_test_group():
     assert gpt_group["type"] == "url-test"
     assert gpt_group["url"] == "https://chatgpt.com/cdn-cgi/trace"
     assert gpt_group["proxies"][:2] == [
-        "🇺🇸 美国 UDP (端口跳跃)",
+        "🇺🇸 美国 UDP 443",
         "🇺🇸 美国 UDP TUIC",
     ]
     assert "🇺🇸 美国 TCP (VLESS+REALITY)" in gpt_group["proxies"]
@@ -90,7 +113,7 @@ def test_google_uses_tcp_first_fallback_group():
     assert google_group["proxies"] == [
         "🇺🇸 美国 TCP (VLESS+REALITY)",
         "🇺🇸 美国 TCP 备用 (VLESS+REALITY)",
-        "🇺🇸 美国 UDP (端口跳跃)",
+        "🇺🇸 美国 UDP 443",
         "🇺🇸 美国 UDP TUIC",
     ]
     assert "🌐 Google 优化" in groups["🚀 节点选择"]["proxies"]
@@ -106,7 +129,7 @@ def test_academic_access_group_defaults_to_direct():
         "DIRECT",
         "🇺🇸 美国 TCP (VLESS+REALITY)",
         "🇺🇸 美国 TCP 备用 (VLESS+REALITY)",
-        "🇺🇸 美国 UDP (端口跳跃)",
+        "🇺🇸 美国 UDP 443",
         "🇺🇸 美国 UDP TUIC",
     ]
     assert "📚 学术访问" in groups["🚀 节点选择"]["proxies"]
@@ -121,7 +144,7 @@ def test_telegram_uses_manual_select_with_hysteria2_as_default():
         "name": "✈️ Telegram 优化",
         "type": "select",
         "proxies": [
-            "🇺🇸 美国 UDP (端口跳跃)",
+            "🇺🇸 美国 UDP 443",
             "🇺🇸 美国 UDP TUIC",
             "🇺🇸 美国 TCP (VLESS+REALITY)",
             "🇺🇸 美国 TCP 备用 (VLESS+REALITY)",

@@ -273,11 +273,10 @@ dns:
 
 # 3. 节点 (password 和 uuid 由 subscription_service.py 在下发订阅时按用户注入)
 proxies:
-  - name: 🇺🇸 美国 UDP (端口跳跃)
+  - name: 🇺🇸 美国 UDP 443
     type: hysteria2
     server: __HY_SERVER_HOST__
     port: 443
-    ports: 20000-40000
     password: PLACEHOLDER
     obfs: salamander
     obfs-password: __HY_OBFS_PASSWORD__
@@ -286,9 +285,6 @@ proxies:
     udp: true
     up: 100 Mbps
     down: 400 Mbps
-    transport:
-      type: udp
-      hopInterval: 30s
 
   - name: 🇺🇸 美国 UDP TUIC
     type: tuic
@@ -349,7 +345,7 @@ proxy-groups:
       - 📚 学术访问
       - ✈️ Telegram 优化
       - 🔄 自动选择
-      - 🇺🇸 美国 UDP (端口跳跃)
+      - 🇺🇸 美国 UDP 443
       - 🇺🇸 美国 UDP TUIC
       - 🇺🇸 美国 TCP (VLESS+REALITY)
       - 🇺🇸 美国 TCP 备用 (VLESS+REALITY)
@@ -358,7 +354,7 @@ proxy-groups:
   - name: 🔄 自动选择
     type: fallback
     proxies:
-      - 🇺🇸 美国 UDP (端口跳跃)
+      - 🇺🇸 美国 UDP 443
       - 🇺🇸 美国 UDP TUIC
       - 🇺🇸 美国 TCP (VLESS+REALITY)
       - 🇺🇸 美国 TCP 备用 (VLESS+REALITY)
@@ -369,7 +365,7 @@ proxy-groups:
   - name: ⚡ GitHub 加速
     type: url-test
     proxies:
-      - 🇺🇸 美国 UDP (端口跳跃)
+      - 🇺🇸 美国 UDP 443
       - 🇺🇸 美国 UDP TUIC
       - 🇺🇸 美国 TCP (VLESS+REALITY)
       - 🇺🇸 美国 TCP 备用 (VLESS+REALITY)
@@ -381,7 +377,7 @@ proxy-groups:
   - name: 🤖 GPT 优化
     type: url-test
     proxies:
-      - 🇺🇸 美国 UDP (端口跳跃)
+      - 🇺🇸 美国 UDP 443
       - 🇺🇸 美国 UDP TUIC
       - 🇺🇸 美国 TCP (VLESS+REALITY)
       - 🇺🇸 美国 TCP 备用 (VLESS+REALITY)
@@ -395,7 +391,7 @@ proxy-groups:
     proxies:
       - 🇺🇸 美国 TCP (VLESS+REALITY)
       - 🇺🇸 美国 TCP 备用 (VLESS+REALITY)
-      - 🇺🇸 美国 UDP (端口跳跃)
+      - 🇺🇸 美国 UDP 443
       - 🇺🇸 美国 UDP TUIC
     url: https://www.gstatic.com/generate_204
     interval: 60
@@ -407,13 +403,13 @@ proxy-groups:
       - DIRECT
       - 🇺🇸 美国 TCP (VLESS+REALITY)
       - 🇺🇸 美国 TCP 备用 (VLESS+REALITY)
-      - 🇺🇸 美国 UDP (端口跳跃)
+      - 🇺🇸 美国 UDP 443
       - 🇺🇸 美国 UDP TUIC
 
   - name: ✈️ Telegram 优化
     type: select
     proxies:
-      - 🇺🇸 美国 UDP (端口跳跃)
+      - 🇺🇸 美国 UDP 443
       - 🇺🇸 美国 UDP TUIC
       - 🇺🇸 美国 TCP (VLESS+REALITY)
       - 🇺🇸 美国 TCP 备用 (VLESS+REALITY)
