@@ -16,6 +16,11 @@ profile:
 dns:
   enable: true
   ipv6: false
+  respect-rules: true
+  prefer-h3: false
+  proxy-server-nameserver:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
   cache-algorithm: arc
   default-nameserver:
     - 223.5.5.5
@@ -74,8 +79,8 @@ dns:
     - https://dns.alidns.com/dns-query
 
   fallback:
-    - tls://8.8.8.8
-    - tls://1.1.1.1
+    - 'https://1.1.1.1/dns-query#RULES'
+    - 'https://8.8.8.8/dns-query#RULES'
 
   direct-nameserver:
     - 223.5.5.5
@@ -90,167 +95,165 @@ dns:
     '+.cn':
       - 223.5.5.5
       - 119.29.29.29
-      - https://doh.pub/dns-query
-      - https://dns.alidns.com/dns-query
     '+.github.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.githubusercontent.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.githubassets.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.github.io':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.githubapp.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.github.dev':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.ghcr.io':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.githubcopilot.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.github-cloud.s3.amazonaws.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.openai.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.chatgpt.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.oaistatic.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.oaiusercontent.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.openaiusercontent.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.ai.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.auth0.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.arkoselabs.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.statsigapi.net':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.featuregates.org':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.google.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.gmail.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.googlemail.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.googleapis.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.gstatic.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.googleusercontent.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.ggpht.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.gvt1.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.googlevideo.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.youtube.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.ytimg.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.youtu.be':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.google.com.hk':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.google.com.tw':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.googleadservices.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.googlesyndication.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.google-analytics.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.googletagmanager.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.googletagservices.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.doubleclick.net':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.recaptcha.net':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.gvt2.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.gvt3.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.appspot.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.firebaseapp.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.firebaseio.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.blogger.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.blogspot.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.telegram.org':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.telegram.me':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.telegram.dog':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.t.me':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.telegra.ph':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.tdesktop.com':
-      - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - 'https://1.1.1.1/dns-query#RULES'
+      - 'https://8.8.8.8/dns-query#RULES'
     '+.steamcontent.com':
       - 223.5.5.5
       - 119.29.29.29

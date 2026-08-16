@@ -4,10 +4,54 @@ import yaml
 
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "hysteria" / "clash-default.yaml.tpl"
+RULES_DOH = [
+    "https://1.1.1.1/dns-query#RULES",
+    "https://8.8.8.8/dns-query#RULES",
+]
 
 
 def load_template():
     return yaml.safe_load(TEMPLATE.read_text(encoding="utf-8"))
+
+
+def test_foreign_dns_queries_follow_proxy_rules():
+    cfg = load_template()
+    dns = cfg["dns"]
+    rules_doh = RULES_DOH
+
+    assert dns["respect-rules"] is True
+    assert dns["prefer-h3"] is False
+    assert dns["proxy-server-nameserver"] == [
+        "https://doh.pub/dns-query",
+        "https://dns.alidns.com/dns-query",
+    ]
+    assert dns["fallback"] == rules_doh
+
+    policy = dns["nameserver-policy"]
+    foreign_policies = {
+        domain: nameservers
+        for domain, nameservers in policy.items()
+        if nameservers == rules_doh
+    }
+    assert len(foreign_policies) == 53
+    assert sum(len(nameservers) for nameservers in foreign_policies.values()) == 106
+
+
+def test_domestic_and_steam_cdn_dns_stay_domestic():
+    policy = load_template()["dns"]["nameserver-policy"]
+    domestic_nameservers = ["223.5.5.5", "119.29.29.29"]
+
+    assert policy["+.cn"] == domestic_nameservers
+    assert policy["+.steamcontent.com"] == domestic_nameservers
+
+
+def test_template_contains_no_bare_foreign_doh_or_dot():
+    text = TEMPLATE.read_text(encoding="utf-8")
+
+    assert "https://1.1.1.1/dns-query\n" not in text
+    assert "https://8.8.8.8/dns-query\n" not in text
+    assert "tls://1.1.1.1" not in text
+    assert "tls://8.8.8.8" not in text
 
 
 def test_github_uses_dedicated_url_test_group():
@@ -294,10 +338,7 @@ def test_github_dns_uses_overseas_resolvers():
     policy = cfg["dns"]["nameserver-policy"]
 
     for domain in ("+.github.com", "+.githubusercontent.com", "+.ghcr.io"):
-        assert policy[domain] == [
-            "https://1.1.1.1/dns-query",
-            "https://8.8.8.8/dns-query",
-        ]
+        assert policy[domain] == RULES_DOH
 
 
 def test_gpt_dns_uses_overseas_resolvers():
@@ -305,10 +346,7 @@ def test_gpt_dns_uses_overseas_resolvers():
     policy = cfg["dns"]["nameserver-policy"]
 
     for domain in ("+.openai.com", "+.chatgpt.com", "+.oaistatic.com", "+.oaiusercontent.com"):
-        assert policy[domain] == [
-            "https://1.1.1.1/dns-query",
-            "https://8.8.8.8/dns-query",
-        ]
+        assert policy[domain] == RULES_DOH
 
 
 def test_google_dns_uses_overseas_resolvers():
@@ -327,10 +365,7 @@ def test_google_dns_uses_overseas_resolvers():
         "+.gvt2.com",
         "+.firebaseapp.com",
     ):
-        assert policy[domain] == [
-            "https://1.1.1.1/dns-query",
-            "https://8.8.8.8/dns-query",
-        ]
+        assert policy[domain] == RULES_DOH
 
 
 def test_telegram_dns_uses_overseas_resolvers():
@@ -338,10 +373,7 @@ def test_telegram_dns_uses_overseas_resolvers():
     policy = cfg["dns"]["nameserver-policy"]
 
     for domain in ("+.telegram.org", "+.telegram.me", "+.t.me", "+.telegra.ph"):
-        assert policy[domain] == [
-            "https://1.1.1.1/dns-query",
-            "https://8.8.8.8/dns-query",
-        ]
+        assert policy[domain] == RULES_DOH
 
 
 def test_domestic_dns_prefers_mainland_resolvers_and_preserves_local_names():
@@ -358,7 +390,7 @@ def test_domestic_dns_prefers_mainland_resolvers_and_preserves_local_names():
     assert dns["nameserver"] == mainland_resolvers
     assert dns["direct-nameserver"] == mainland_resolvers
     assert dns["direct-nameserver-follow-policy"] is False
-    assert dns["nameserver-policy"]["+.cn"] == mainland_resolvers
+    assert dns["nameserver-policy"]["+.cn"] == mainland_resolvers[:2]
     for pattern in (
         "*.lan",
         "*.local",
