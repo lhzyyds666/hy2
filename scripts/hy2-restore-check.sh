@@ -9,6 +9,11 @@ MAX_MEMBERS="${HY2_RESTORE_MAX_MEMBERS:-4096}"
 MAX_FILE_BYTES="${HY2_RESTORE_MAX_FILE_BYTES:-67108864}"
 MAX_TOTAL_BYTES="${HY2_RESTORE_MAX_TOTAL_BYTES:-268435456}"
 
+if [[ "$HY_DIR" != /* || "$HY_DIR" == / || "/$HY_DIR/" == *'/../'* || "/$HY_DIR/" == *'/./'* ]]; then
+  printf 'HY2_HY_DIR must be a canonical absolute non-root path\n' >&2
+  exit 2
+fi
+
 if [[ -z "$archive" ]]; then
   printf 'Usage: %s /path/to/hy2-backup.tar.gz[.enc]\n' "$0" >&2
   exit 2
@@ -323,7 +328,9 @@ except (tarfile.TarError, OSError, EOFError) as exc:
 PY
 
 python3 - "$extract_root" "$HY_DIR" <<'PY'
+import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -334,6 +341,7 @@ except Exception:  # pragma: no cover - deploy installs python3-yaml
 
 root = Path(sys.argv[1])
 hy_dir = Path(sys.argv[2])
+archive_hy_rel = Path(*hy_dir.parts[1:]) if hy_dir.is_absolute() else hy_dir
 errors = []
 warnings = []
 
@@ -346,22 +354,53 @@ for p in root.rglob('*.json'):
         errors.append(f'invalid JSON: {p.relative_to(root)} ({exc})')
         continue
     rel = str(p.relative_to(root))
-    if rel.endswith('root/hysteria/users.json') and not isinstance(data, dict):
+    if Path(rel) == archive_hy_rel / 'users.json' and not isinstance(data, dict):
         errors.append('users.json must be a JSON object')
-    if rel.endswith('root/hysteria/subscription_meta.json') and not isinstance(data, dict):
+    if (
+        Path(rel) == archive_hy_rel / 'subscription_meta.json'
+        and not isinstance(data, dict)
+    ):
         errors.append('subscription_meta.json must be a JSON object')
+    if Path(rel) == archive_hy_rel / 'state/template_versions.json':
+        templates = data.get('templates') if isinstance(data, dict) else None
+        if (
+            not isinstance(data, dict)
+            or data.get('version') != 1
+            or not isinstance(templates, dict)
+        ):
+            errors.append('template_versions.json has an unsupported structure')
+            continue
+        for revision, entry in templates.items():
+            text = entry.get('yaml') if isinstance(entry, dict) else None
+            template_mtime = (
+                entry.get('template_mtime')
+                if isinstance(entry, dict)
+                else None
+            )
+            if (
+                not isinstance(revision, str)
+                or not re.fullmatch(r'[0-9a-f]{64}', revision)
+                or not isinstance(text, str)
+                or hashlib.sha256(text.encode('utf-8')).hexdigest() != revision
+                or not isinstance(template_mtime, str)
+                or not re.fullmatch(r'[0-9TZ:.-]{0,40}', template_mtime)
+            ):
+                errors.append(
+                    f'template_versions.json contains an invalid snapshot: '
+                    f'{revision!r}'
+                )
 
-template = root / 'root/hysteria/template.yaml'
+template = root / archive_hy_rel / 'template.yaml'
 if template.exists() and yaml is not None:
     try:
         parsed = yaml.safe_load(template.read_text(encoding='utf-8')) or {}
         if not isinstance(parsed, dict):
             errors.append('template.yaml must parse to a mapping')
     except Exception as exc:
-        errors.append(f'invalid YAML: root/hysteria/template.yaml ({exc})')
+        errors.append(f'invalid YAML: {archive_hy_rel}/template.yaml ({exc})')
 
-users = root / 'root/hysteria/users.json'
-meta = root / 'root/hysteria/subscription_meta.json'
+users = root / archive_hy_rel / 'users.json'
+meta = root / archive_hy_rel / 'subscription_meta.json'
 if not users.exists():
     warnings.append('users.json not present in archive')
 if not meta.exists():
@@ -372,8 +411,9 @@ overwrites = []
 for p in archive_files:
     rel = p.relative_to(root)
     parts = rel.parts
-    if len(parts) >= 2 and parts[0] == 'root' and parts[1] == 'hysteria':
-        live = hy_dir.joinpath(*parts[2:])
+    prefix_parts = archive_hy_rel.parts
+    if parts[:len(prefix_parts)] == prefix_parts:
+        live = hy_dir.joinpath(*parts[len(prefix_parts):])
         if live.exists():
             overwrites.append(str(live))
 

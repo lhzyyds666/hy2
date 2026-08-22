@@ -1,5 +1,7 @@
 """Subscription profile and Clash YAML rendering helpers."""
+import hashlib
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,7 +17,7 @@ GITHUB_GROUP = '⚡ GitHub 加速'
 GPT_GROUP = '🤖 GPT 优化'
 GOOGLE_GROUP = '🌐 Google 优化'
 TELEGRAM_GROUP = '✈️ Telegram 优化'
-HY2_UDP_PROXY = '🇺🇸 美国 UDP (端口跳跃)'
+HY2_UDP_PROXY = '🇺🇸 美国 UDP 443'
 TUIC_UDP_PROXY = '🇺🇸 美国 UDP TUIC'
 VLESS_TCP_PROXY = '🇺🇸 美国 TCP (VLESS+REALITY)'
 VLESS_BACKUP_PROXY = '🇺🇸 美国 TCP 备用 (VLESS+REALITY)'
@@ -26,6 +28,10 @@ USER_CLASH_RULES_KEY = 'clash_rules'
 USER_FAKE_IP_FILTER_KEY = 'clash_fake_ip_filter'
 USER_TUN_ROUTE_EXCLUDE_ADDRESS_KEY = 'clash_tun_route_exclude_address'
 USER_TUIC_ENABLED_KEY = 'tuic_enabled'
+USER_TEMPLATE_MODE_KEY = 'clash_template_mode'
+USER_TEMPLATE_REVISION_KEY = 'clash_template_revision'
+TEMPLATE_MODE_FOLLOW = 'follow'
+TEMPLATE_MODE_PINNED = 'pinned'
 
 RULE_PACKS = {
     'easyconnect': {
@@ -108,6 +114,90 @@ class SubscriptionProfileContext:
     template_file: object
     users_file: object
     load_json: object
+    template_versions_file: object = None
+
+
+@dataclass(frozen=True)
+class SelectedTemplate:
+    text: str
+    mode: str
+    revision: str
+    mtime: str
+
+
+@dataclass(frozen=True)
+class RenderedSubscription:
+    text: str
+    template_mode: str
+    template_revision: str
+    template_mtime: str
+
+
+class PinnedTemplateUnavailable(RuntimeError):
+    """A user selected a pinned template revision that cannot be trusted."""
+
+
+def normalize_user_template_mode(user_cfg):
+    if not isinstance(user_cfg, dict):
+        return TEMPLATE_MODE_FOLLOW
+    if user_cfg.get(USER_TEMPLATE_MODE_KEY) == TEMPLATE_MODE_PINNED:
+        return TEMPLATE_MODE_PINNED
+    return TEMPLATE_MODE_FOLLOW
+
+
+def template_revision(raw):
+    if isinstance(raw, str):
+        raw = raw.encode('utf-8')
+    return hashlib.sha256(bytes(raw or b'')).hexdigest()
+
+
+def _read_live_template(template_file):
+    try:
+        with template_file.open('rb') as source:
+            raw = source.read()
+            mtime = datetime.utcfromtimestamp(
+                os.fstat(source.fileno()).st_mtime,
+            ).isoformat(timespec='seconds') + 'Z'
+    except FileNotFoundError:
+        return b'', ''
+    return raw, mtime
+
+
+def _selected_template(ctx, user_cfg):
+    mode = normalize_user_template_mode(user_cfg)
+    if mode == TEMPLATE_MODE_FOLLOW:
+        raw, mtime = _read_live_template(ctx.template_file)
+        return SelectedTemplate(
+            raw.decode('utf-8'),
+            mode,
+            template_revision(raw),
+            mtime,
+        )
+
+    revision = str(user_cfg.get(USER_TEMPLATE_REVISION_KEY) or '').lower()
+    if not re.fullmatch(r'[0-9a-f]{64}', revision):
+        raise PinnedTemplateUnavailable('pinned template revision is invalid')
+    if ctx.template_versions_file is None:
+        raise PinnedTemplateUnavailable('template snapshot store is unavailable')
+    state = ctx.load_json(ctx.template_versions_file, {})
+    if not isinstance(state, dict) or state.get('version') != 1:
+        raise PinnedTemplateUnavailable('template snapshot store is invalid')
+    templates = state.get('templates')
+    entry = templates.get(revision) if isinstance(templates, dict) else None
+    text = entry.get('yaml') if isinstance(entry, dict) else None
+    if not isinstance(text, str) or template_revision(text) != revision:
+        raise PinnedTemplateUnavailable('pinned template snapshot is unavailable')
+    template_mtime = entry.get('template_mtime')
+    if not isinstance(template_mtime, str) or not re.fullmatch(
+        r'[0-9TZ:.-]{0,40}', template_mtime,
+    ):
+        raise PinnedTemplateUnavailable('pinned template metadata is invalid')
+    return SelectedTemplate(
+        text,
+        mode,
+        revision,
+        template_mtime,
+    )
 
 
 def normalize_subscription_profile(raw):
@@ -445,12 +535,23 @@ def template_mtime_iso(template_file):
         return ''
 
 
-def prepend_subscription_header(text, username, profile, template_file, *, generated_at=None):
+def prepend_subscription_header(
+    text,
+    username,
+    profile,
+    *,
+    template_mtime='',
+    template_mode=TEMPLATE_MODE_FOLLOW,
+    template_revision_value='',
+    generated_at=None,
+):
     generated = generated_at or utc_now_iso()
     profile = normalize_subscription_profile(profile)
     header = [
         f'# hy2-generated-at: {generated}',
-        f'# hy2-template-mtime: {template_mtime_iso(template_file)}',
+        f'# hy2-template-mtime: {template_mtime}',
+        f'# hy2-template-mode: {template_mode}',
+        f'# hy2-template-revision: {template_revision_value}',
         f'# hy2-user: {username}',
         f'# hy2-profile: {profile}',
         '# hy2-note: refresh the client subscription after route or rule changes',
@@ -489,18 +590,28 @@ def render_user_clash_overrides_yaml(text, user_cfg):
         return text
 
 
-def build_yaml(ctx, username, auth_secret, profile='default', *, generated_at=None):
-    if not ctx.template_file.exists():
-        return ''
-    text = ctx.template_file.read_text(encoding='utf-8')
+def render_subscription(
+    ctx,
+    username,
+    auth_secret,
+    profile='default',
+    *,
+    generated_at=None,
+):
+    users = ctx.load_json(ctx.users_file, {})
+    user_cfg = users.get(username) or {}
+    selected = _selected_template(ctx, user_cfg)
+    text = selected.text
+    if not text:
+        return RenderedSubscription(
+            '', selected.mode, selected.revision, selected.mtime,
+        )
     text = re.sub(
         r'(?m)^(\s*password:\s*).*$',
         lambda match: f'{match.group(1)}{username}:{auth_secret}',
         text,
         count=1,
     )
-    users = ctx.load_json(ctx.users_file, {})
-    user_cfg = users.get(username) or {}
     vless_uuid = str(user_cfg.get('vless_uuid') or '').strip()
     if vless_uuid:
         text = re.sub(
@@ -516,5 +627,28 @@ def build_yaml(ctx, username, auth_secret, profile='default', *, generated_at=No
     text = render_profile_yaml(text, profile)
     text = render_user_transport_policy_yaml(text, user_cfg)
     text = render_user_clash_overrides_yaml(text, user_cfg)
-    return prepend_subscription_header(
-        text, username, profile, ctx.template_file, generated_at=generated_at)
+    rendered = prepend_subscription_header(
+        text,
+        username,
+        profile,
+        template_mtime=selected.mtime,
+        template_mode=selected.mode,
+        template_revision_value=selected.revision,
+        generated_at=generated_at,
+    )
+    return RenderedSubscription(
+        rendered,
+        selected.mode,
+        selected.revision,
+        selected.mtime,
+    )
+
+
+def build_yaml(ctx, username, auth_secret, profile='default', *, generated_at=None):
+    return render_subscription(
+        ctx,
+        username,
+        auth_secret,
+        profile=profile,
+        generated_at=generated_at,
+    ).text

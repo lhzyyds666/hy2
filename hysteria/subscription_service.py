@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import http.client
+import ipaddress
 import json
 import os
 import re
@@ -59,6 +60,7 @@ ONLINE_FILE = Path('/root/hysteria/state/online.json')
 DEVICE_ADMISSIONS_FILE = Path('/root/hysteria/state/device_admissions.json')
 META_FILE = Path('/root/hysteria/subscription_meta.json')
 TEMPLATE_FILE = Path('/root/hysteria/template.yaml')
+TEMPLATE_VERSIONS_FILE = Path('/root/hysteria/state/template_versions.json')
 BACKUP_DIR = Path('/root/hysteria/backups')
 XRAY_CONFIG_FILE = Path('/usr/local/etc/xray/config.json')
 SESSIONS_FILE = Path('/root/hysteria/state/panel_sessions.json')
@@ -1112,6 +1114,33 @@ SUBSCRIPTION_PROFILES = profile_defs.SUBSCRIPTION_PROFILES
 SUBSCRIPTION_PROFILE_ORDER = profile_defs.SUBSCRIPTION_PROFILE_ORDER
 RULE_PACKS = profile_defs.RULE_PACKS
 RULE_PACK_ORDER = profile_defs.RULE_PACK_ORDER
+USER_TEMPLATE_MODE_KEY = profile_defs.USER_TEMPLATE_MODE_KEY
+USER_TEMPLATE_REVISION_KEY = profile_defs.USER_TEMPLATE_REVISION_KEY
+TEMPLATE_MODE_FOLLOW = profile_defs.TEMPLATE_MODE_FOLLOW
+TEMPLATE_MODE_PINNED = profile_defs.TEMPLATE_MODE_PINNED
+USER_CLASH_RULE_MAX_COUNT = 128
+USER_CLASH_RULE_TYPES = (
+    ('DOMAIN-SUFFIX', '域名后缀'),
+    ('DOMAIN', '完整域名'),
+    ('DOMAIN-KEYWORD', '域名关键词'),
+    ('IP-CIDR', 'IPv4 网段'),
+    ('IP-CIDR6', 'IPv6 网段'),
+    ('PROCESS-NAME', '进程名称'),
+)
+USER_CLASH_RULE_TYPE_KEYS = {key for key, _label in USER_CLASH_RULE_TYPES}
+USER_CLASH_RULE_ACTIONS = {
+    'DIRECT': 'DIRECT',
+    'PROXY': NODE_GROUP,
+    'REJECT': 'REJECT',
+}
+
+
+class UserRuleConflictError(RuntimeError):
+    """The user's configuration changed after their rule form was rendered."""
+
+
+class UserRuleStateError(RuntimeError):
+    """The stored personal rule list cannot be safely mutated."""
 
 
 def _subscription_profile_context():
@@ -1119,6 +1148,7 @@ def _subscription_profile_context():
         template_file=TEMPLATE_FILE,
         users_file=USERS_FILE,
         load_json=load_json,
+        template_versions_file=TEMPLATE_VERSIONS_FILE,
     )
 
 
@@ -1137,6 +1167,22 @@ def render_profile_yaml(text, profile):
 def build_yaml(username, auth_secret, profile='default', *, generated_at=None):
     return profile_defs.build_yaml(
         _subscription_profile_context(), username, auth_secret, profile=profile,
+        generated_at=generated_at,
+    )
+
+
+def render_subscription_yaml(
+    username,
+    auth_secret,
+    profile='default',
+    *,
+    generated_at=None,
+):
+    return profile_defs.render_subscription(
+        _subscription_profile_context(),
+        username,
+        auth_secret,
+        profile=profile,
         generated_at=generated_at,
     )
 
@@ -2904,7 +2950,7 @@ def render_subscription_profile_links(base_url, user, token):
         '<div class="import-head">'
         '<div><h2 class="section-title">快速导入</h2>'
         '<div class="small">先选择使用场景，再复制链接到客户端；跨设备时可按需显示二维码。'
-        f'模板更新时间：{html.escape(subscription_template_mtime() or "未知")}。</div></div>'
+        f'通用模板更新时间：{html.escape(subscription_template_mtime() or "未知")}。</div></div>'
         f'<span class="badge" id="profile-selected-badge">{html.escape(default_meta["label"])}</span>'
         '</div>'
         f'<div class="profile-links mt-md" role="group" aria-label="选择订阅模式">{"".join(items)}</div>'
@@ -2929,6 +2975,258 @@ def render_subscription_profile_links(base_url, user, token):
         '</div>'
         '</div>'
     )
+
+
+def render_user_template_controls(cfg):
+    """Render the current user's common-template update policy."""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    status = user_template_sync_status(cfg)
+    mode = status['mode']
+    common_short = status['common_revision'][:10] or '不可用'
+    personal_items = 0
+    for key in (
+        profile_defs.USER_CLASH_RULES_KEY,
+        profile_defs.USER_FAKE_IP_FILTER_KEY,
+        profile_defs.USER_TUN_ROUTE_EXCLUDE_ADDRESS_KEY,
+    ):
+        values = cfg.get(key)
+        if isinstance(values, list):
+            personal_items += len(values)
+
+    if mode == TEMPLATE_MODE_FOLLOW:
+        badge = '<span class="badge">自动跟随</span>'
+        summary = (
+            '当前直接使用最新版通用模板；管理员更新后，你下次更新订阅时自动生效。'
+        )
+        version = f'通用版本 <code>{html.escape(common_short)}</code>'
+        actions = '''
+  <form method="post" action="/user/template-mode" class="inline-form-row mt-md">
+    <input type="hidden" name="action" value="pin">
+    <button class="btn secondary" type="submit">固定当前通用模板</button>
+  </form>'''
+    else:
+        pinned_short = status['pinned_revision'][:10] or '不可用'
+        if status['update_available']:
+            badge = '<span class="badge yellow">有新版可合并</span>'
+            summary = (
+                '你仍在使用固定版本，通用模板的新改动不会自动进入订阅。'
+            )
+            version = (
+                f'固定版本 <code>{html.escape(pinned_short)}</code> · '
+                f'最新通用版 <code>{html.escape(common_short)}</code>'
+            )
+        else:
+            badge = '<span class="badge">固定版本</span>'
+            summary = '当前固定版本与最新版通用模板一致；以后有更新时可手动合并。'
+            version = f'固定版本 <code>{html.escape(pinned_short)}</code>'
+        merge_label = (
+            '合并最新通用模板'
+            if status['update_available']
+            else '重新合并当前通用模板'
+        )
+        merge_action = f'''
+    <form method="post" action="/user/template-mode" class="inline-form-row">
+      <input type="hidden" name="action" value="merge">
+      <button class="btn" type="submit">{merge_label}</button>
+    </form>'''
+        actions = f'''
+  <div class="row gap-sm mt-md">{merge_action}
+    <form method="post" action="/user/template-mode" class="inline-form-row">
+      <input type="hidden" name="action" value="follow">
+      <button class="btn secondary" type="submit">改为自动跟随</button>
+    </form>
+  </div>'''
+
+    return f'''<div class="card mt-md">
+  <div class="row" style="justify-content:space-between;align-items:flex-start;">
+    <div>
+      <h2 class="section-title">通用模板与我的规则</h2>
+      <div class="small">{summary}</div>
+    </div>
+    {badge}
+  </div>
+  <div class="small mt-md">{version} · 个人叠加项 {personal_items} 条</div>
+  {actions}
+  <div class="small faint mt-sm">固定后可继续添加自己的规则；“合并最新通用模板”只更新底板，不会覆盖你的个人规则。</div>
+</div>'''
+
+
+def render_user_rule_pack_controls(cfg):
+    """Render editable personal rules scoped to the current user session."""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    revision = user_config_revision(cfg)
+    rules_available = True
+    try:
+        personal_rules = _strict_user_clash_rules(cfg)
+    except UserRuleStateError:
+        personal_rules = []
+        rules_available = False
+
+    current = []
+    for config_key in (
+        profile_defs.USER_CLASH_RULES_KEY,
+        profile_defs.USER_FAKE_IP_FILTER_KEY,
+        profile_defs.USER_TUN_ROUTE_EXCLUDE_ADDRESS_KEY,
+    ):
+        values = cfg.get(config_key)
+        if isinstance(values, list):
+            current.extend(values)
+
+    options = []
+    summaries = []
+    for key in RULE_PACK_ORDER:
+        pack = RULE_PACKS.get(key)
+        if not isinstance(pack, dict):
+            continue
+        label = html.escape(str(pack.get('label') or key))
+        desc = html.escape(str(pack.get('desc') or ''))
+        additions = []
+        for pack_key in ('rules', 'fake_ip_filter', 'tun_route_exclude_address'):
+            values = pack.get(pack_key)
+            if isinstance(values, list):
+                additions.extend(values)
+        applied = bool(additions) and all(item in current for item in additions)
+        status = ' · 已应用' if applied else ''
+        options.append(
+            f'<option value="{html.escape(key, quote=True)}">'
+            f'{label}{status}</option>'
+        )
+        applied_badge = '<span class="badge">已应用</span>' if applied else ''
+        summaries.append(
+            f'<li><strong>{label}</strong>：{desc} {applied_badge}</li>'
+        )
+
+    type_options = ''.join(
+        f'<option value="{html.escape(key, quote=True)}">'
+        f'{html.escape(key)}（{html.escape(label)}）</option>'
+        for key, label in USER_CLASH_RULE_TYPES
+    )
+    rows = []
+    type_labels = dict(USER_CLASH_RULE_TYPES)
+    for index, rule in enumerate(personal_rules):
+        rule_type, pattern, action, extra = _parse_clash_rule(rule)
+        type_label = type_labels.get(rule_type, rule_type)
+        if action == NODE_GROUP:
+            action_label = '代理'
+        else:
+            action_label = _ACTION_LABELS.get(action, action)
+        extra_label = (
+            '<span class="badge gray">no-resolve</span>' if extra else ''
+        )
+        rows.append(
+            '<tr>'
+            f'<td>{index + 1}</td>'
+            f'<td>{html.escape(type_label)}</td>'
+            f'<td class="break"><code>{html.escape(pattern)}</code></td>'
+            f'<td>{html.escape(action_label)} {extra_label}</td>'
+            '<td>'
+            '<form method="post" action="/user/rules/delete" '
+            'class="inline-form-row" data-action="delete-user-rule">'
+            f'<input type="hidden" name="index" value="{index}">'
+            f'<input type="hidden" name="expected_rule" '
+            f'value="{html.escape(rule, quote=True)}">'
+            f'<input type="hidden" name="user_revision" value="{revision}">'
+            '<button class="btn danger-btn btn-sm" type="submit">删除</button>'
+            '</form></td></tr>'
+        )
+
+    state_alert = ''
+    disabled = ''
+    if not rules_available:
+        disabled = ' disabled aria-disabled="true"'
+        state_alert = render_alert(
+            '个人规则数据当前不可解析。为避免覆盖已有内容，新增和删除已暂停；请联系管理员修复。',
+            'err',
+        )
+    table_body = ''.join(rows) or (
+        '<tr><td colspan="5" class="empty">还没有个人规则，可在下方添加第一条。</td></tr>'
+    )
+    pack_section = ''
+    if options:
+        pack_section = f'''
+  <details class="mt-md">
+    <summary>使用预设规则包</summary>
+    <form method="post" action="/user/rule-pack/apply" class="inline-form mt-md">
+      <label for="user-rule-pack">规则包</label>
+      <div class="row gap-sm">
+        <select id="user-rule-pack" name="pack">{''.join(options)}</select>
+        <button class="btn secondary" type="submit">应用预设规则包</button>
+      </div>
+    </form>
+    <ul class="small mt-md">{''.join(summaries)}</ul>
+    <div class="small faint mt-sm">重复应用不会重复添加；规则包也只写入你的个人叠加层。</div>
+  </details>'''
+
+    return f'''<div class="card mt-md">
+  <div class="row" style="justify-content:space-between;align-items:flex-start;">
+    <div>
+      <h2 class="section-title">我的规则</h2>
+      <div class="small">规则只叠加到你的订阅，不会修改通用模板或其他用户；客户端更新订阅后生效。</div>
+    </div>
+    <span class="badge">{len(personal_rules)} / {USER_CLASH_RULE_MAX_COUNT} 条</span>
+  </div>
+  {state_alert}
+  <form method="post" action="/user/rules/add" class="inline-form mt-md">
+    <input type="hidden" name="user_revision" value="{revision}">
+    <div class="grid grid-2">
+      <div>
+        <label for="user-custom-rule-type">匹配类型</label>
+        <select id="user-custom-rule-type" name="rule_type"{disabled}>{type_options}</select>
+      </div>
+      <div>
+        <label for="user-custom-rule-pattern">匹配内容</label>
+        <input id="user-custom-rule-pattern" name="pattern" required maxlength="512"
+               placeholder="example.com、10.0.0.0/8 或程序名.exe"{disabled}>
+      </div>
+      <div>
+        <label for="user-custom-rule-action">处理方式</label>
+        <select id="user-custom-rule-action" name="action"{disabled}>
+          <option value="DIRECT">直连 (DIRECT)</option>
+          <option value="PROXY">代理 ({html.escape(NODE_GROUP)})</option>
+          <option value="REJECT">拦截 (REJECT)</option>
+        </select>
+      </div>
+      <div>
+        <label for="user-custom-rule-extra">IP 附加选项</label>
+        <select id="user-custom-rule-extra" name="extra" disabled>
+          <option value="">无</option>
+          <option value="no-resolve">no-resolve（跳过 DNS 解析）</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn mt-md" type="submit"{disabled}>添加到我的规则</button>
+  </form>
+  <div class="card scroll-x mt-md" tabindex="0" aria-label="我的个人规则，可横向滚动" style="padding:0;overflow:hidden;">
+    <table class="table">
+      <caption class="sr-only">我的个人规则</caption>
+      <thead><tr><th>#</th><th>类型</th><th>匹配内容</th><th>处理方式</th><th>操作</th></tr></thead>
+      <tbody>{table_body}</tbody>
+    </table>
+  </div>
+  {pack_section}
+  <div class="small faint mt-sm">个人规则优先于通用模板规则，从上到下匹配；新规则会插入最前面。</div>
+</div>
+<script>
+(function() {{
+  var type = document.getElementById('user-custom-rule-type');
+  var extra = document.getElementById('user-custom-rule-extra');
+  function syncUserRuleExtra() {{
+    if (!type || !extra) return;
+    var isIp = type.value === 'IP-CIDR' || type.value === 'IP-CIDR6';
+    extra.disabled = type.disabled || !isIp;
+    if (!isIp) extra.value = '';
+  }}
+  if (type) type.addEventListener('change', syncUserRuleExtra);
+  syncUserRuleExtra();
+  document.addEventListener('submit', function(event) {{
+    var form = event.target;
+    if (form && form.dataset.action === 'delete-user-rule' &&
+        !confirm('确认删除这条个人规则？')) {{
+      event.preventDefault();
+    }}
+  }});
+}})();
+</script>'''
 
 
 def _cycle_reset_info(now=None):
@@ -3012,6 +3310,25 @@ def render_user_panel(
         disabled_banner = render_alert('账号已到期，请联系管理员续费', 'err')
     inactive = is_disabled or is_expired
     notice_messages = {
+        'rule_pack_applied': (
+            '规则包已应用到你的配置，客户端更新订阅后生效。'
+        ),
+        'invalid_rule_pack': '规则包无效，未修改你的配置。',
+        'user_rule_added': '个人规则已添加到最前面，客户端更新订阅后生效。',
+        'user_rule_deleted': '个人规则已删除，客户端更新订阅后生效。',
+        'user_rule_exists': '这条个人规则已经存在，没有重复添加。',
+        'user_rule_limit': '个人规则已达到 128 条上限，请先删除不再需要的规则。',
+        'user_rule_pattern_empty': '请填写规则的匹配内容。',
+        'user_rule_invalid_type': '不支持这种规则类型，未修改配置。',
+        'user_rule_invalid_action': '不支持这种处理方式，未修改配置。',
+        'user_rule_invalid_pattern': '匹配内容格式无效，请检查域名、网段或进程名称。',
+        'user_rule_invalid_extra': 'no-resolve 只能用于 IPv4/IPv6 网段规则。',
+        'user_rule_invalid_index': '要删除的规则序号无效，未修改配置。',
+        'user_rule_conflict': '个人规则已在其他页面发生变化，请查看最新列表后重试。',
+        'template_following': '已改为自动跟随，下一次拉取将使用最新版通用模板，并保留你的个人规则。',
+        'template_pinned': '已固定当前通用模板；以后通用模板更新时，由你决定何时合并。',
+        'template_merged': '已合并最新版通用模板，你的个人规则保持不变。',
+        'invalid_template_action': '模板操作无效，未修改你的配置。',
         'token_rotated': (
             'Token 已重置，旧订阅与面板链接已失效。系统已请求断开'
             '现有 Hysteria 连接，并将在短暂延迟后再次复核；'
@@ -3055,7 +3372,20 @@ def render_user_panel(
     notice_message = notice_messages.get(notice_code, '')
     notice_banner = render_alert(
         notice_message,
-        'flash' if notice_code == 'token_rotated' else 'err',
+        (
+            'flash'
+            if notice_code in (
+                'token_rotated',
+                'rule_pack_applied',
+                'user_rule_added',
+                'user_rule_deleted',
+                'user_rule_exists',
+                'template_following',
+                'template_pinned',
+                'template_merged',
+            )
+            else 'err'
+        ),
     )
     if inactive:
         import_assistant = (
@@ -3067,6 +3397,16 @@ def render_user_panel(
         )
     else:
         import_assistant = render_subscription_profile_links(base_url, user, token)
+    rule_pack_controls = (
+        render_user_rule_pack_controls(cfg)
+        if session_auth and not inactive
+        else ''
+    )
+    template_controls = (
+        render_user_template_controls(cfg)
+        if session_auth and not inactive
+        else ''
+    )
     password_session = (
         session_auth and session_kind == USER_SESSION_PANEL_PASSWORD
     )
@@ -3309,6 +3649,8 @@ def render_user_panel(
   <div class="small mt-sm faint">本周期 {cycle_len} 天 · 重置于 {reset_date} · 还剩 {days_left} 天 · 有效期 {html.escape(expiry["label"])}</div>
 </div>
 {import_assistant}
+{template_controls}
+{rule_pack_controls}
 <div class="card mt-md">
   <h2 class="section-title">近 30 天用量趋势</h2>
   <div class="panel-trend">{spark}</div>
@@ -4358,7 +4700,7 @@ def replace_template_config(data, expected_revision=None):
 
 
 _CONFIG_FLASH = {
-    'saved': '模板已保存，所有用户下次拉订阅将使用新配置',
+    'saved': '模板已保存；自动跟随用户下次拉订阅即生效，固定版本用户可在面板中选择合并',
     'invalid_json': 'JSON 格式错误，请检查语法',
     'empty': '配置内容不能为空',
     'load_failed': '加载配置文件失败',
@@ -4445,6 +4787,111 @@ def validate_clash_rule(rule):
     return len(parts) >= 3 and bool(parts[1])
 
 
+def _load_template_versions_unlocked():
+    state = load_json(TEMPLATE_VERSIONS_FILE, {}, required=False)
+    if not state:
+        return {'version': 1, 'templates': {}}
+    if (
+        state.get('version') != 1
+        or not isinstance(state.get('templates'), dict)
+    ):
+        raise state_store.InvalidJsonState(
+            f'invalid template snapshot state: {TEMPLATE_VERSIONS_FILE}',
+        )
+    return state
+
+
+def snapshot_current_template():
+    """Persist the current common template once and return its identity."""
+    with template_lock():
+        raw = _template_bytes_unlocked()
+        if not raw:
+            raise TemplateConfigError('template is missing')
+        try:
+            text = raw.decode('utf-8')
+            import yaml
+            data = yaml.safe_load(text)
+        except Exception as exc:
+            raise TemplateConfigError('template YAML is invalid') from exc
+        if not validate_template_config(data):
+            raise TemplateConfigError('template schema is invalid')
+
+        revision = hashlib.sha256(raw).hexdigest()
+        template_mtime = profile_defs.template_mtime_iso(TEMPLATE_FILE)
+        state = _load_template_versions_unlocked()
+        templates = state['templates']
+        existing = templates.get(revision)
+        if existing is not None:
+            if (
+                not isinstance(existing, dict)
+                or existing.get('yaml') != text
+            ):
+                raise state_store.InvalidJsonState(
+                    f'template snapshot hash mismatch: {TEMPLATE_VERSIONS_FILE}',
+                )
+        else:
+            templates[revision] = {
+                'yaml': text,
+                'created_at': profile_defs.utc_now_iso(),
+                'template_mtime': template_mtime,
+            }
+            save_json(TEMPLATE_VERSIONS_FILE, state)
+        return {
+            'revision': revision,
+            'template_mtime': template_mtime,
+        }
+
+
+def user_template_sync_status(cfg):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    mode = profile_defs.normalize_user_template_mode(cfg)
+    pinned_revision = str(
+        cfg.get(USER_TEMPLATE_REVISION_KEY) or '',
+    ).lower()
+    # Template replacement is atomic, so this read observes either the old or
+    # new complete file without taking a mutation lock during page rendering.
+    raw = _template_bytes_unlocked()
+    common_revision = hashlib.sha256(raw).hexdigest() if raw else ''
+    return {
+        'mode': mode,
+        'common_revision': common_revision,
+        'pinned_revision': pinned_revision if mode == TEMPLATE_MODE_PINNED else '',
+        'update_available': bool(
+            mode == TEMPLATE_MODE_PINNED
+            and pinned_revision != common_revision
+        ),
+    }
+
+
+def set_user_template_mode(username, action):
+    """Change one user's base-template policy without touching their overlays."""
+    username = str(username or '').strip()
+    action = str(action or '').strip().lower()
+    if not username or action not in ('follow', 'pin', 'merge'):
+        return False
+
+    snapshot = None
+    if action in ('pin', 'merge'):
+        # Capture first, then mutate users.json. No lock is nested with
+        # usage_lock(), which preserves the service's global lock ordering.
+        snapshot = snapshot_current_template()
+
+    with usage_lock():
+        users = load_json(USERS_FILE, {})
+        cfg = users.get(username)
+        if not isinstance(cfg, dict):
+            return False
+        if action == 'follow':
+            cfg[USER_TEMPLATE_MODE_KEY] = TEMPLATE_MODE_FOLLOW
+            cfg.pop(USER_TEMPLATE_REVISION_KEY, None)
+        else:
+            cfg[USER_TEMPLATE_MODE_KEY] = TEMPLATE_MODE_PINNED
+            cfg[USER_TEMPLATE_REVISION_KEY] = snapshot['revision']
+        users[username] = cfg
+        save_json(USERS_FILE, users)
+    return True
+
+
 def render_config_editor(
     host,
     flash='',
@@ -4502,12 +4949,12 @@ def render_config_editor(
     )
     content = f'''{alert}
 <div class="card mb-md">
-  <div class="small mb-sm">编辑订阅模板（JSON 格式）。保存后所有用户下次拉订阅即获得新配置，每个用户的密码和 UUID 由服务端从 users.json 自动注入。</div>
+  <div class="small mb-sm">编辑通用订阅模板（JSON 格式）。保存后，自动跟随用户下次拉订阅即获得新配置；固定版本用户会在面板看到新版提示并自行合并。每个用户的密码和 UUID 仍由服务端从 users.json 自动注入。</div>
   <div class="small">模板文件：<code>{html.escape(str(TEMPLATE_FILE))}</code></div>
 </div>
 <div class="card">
   <form method="post" action="/admin/config/save" id="configForm"
-        data-confirm="保存后所有用户下次拉取订阅都会使用这份模板，确认覆盖？">
+        data-confirm="保存后自动跟随用户会使用这份模板，固定版本用户可稍后自行合并，确认覆盖？">
     <input type="hidden" name="template_revision" value="{html.escape(template_revision, quote=True)}">
     <label for="configEditor" class="k">模板 JSON</label>
     <div id="configEditorHelp" class="field-help mb-sm">Tab 插入两个空格；按 Esc 后再按 Tab 可移出编辑器，Shift+Tab 可直接返回上一个控件。</div>
@@ -4666,6 +5113,165 @@ def apply_rule_pack_to_template(pack_key, expected_revision=None):
         return True
 
 
+def _normalize_user_domain_pattern(pattern, *, keyword=False, suffix=False):
+    value = str(pattern or '').strip()
+    if keyword:
+        if (
+            not value
+            or len(value) > 128
+            or any(ch.isspace() or ch in ',/' or ord(ch) < 32 for ch in value)
+        ):
+            return ''
+        return value.lower()
+
+    if suffix:
+        value = value.lstrip('.')
+    value = value.rstrip('.')
+    if (
+        not value
+        or len(value) > 253
+        or '://' in value
+        or any(ch.isspace() or ch in ',/' or ord(ch) < 32 for ch in value)
+    ):
+        return ''
+    try:
+        ascii_value = value.encode('idna').decode('ascii').lower()
+    except UnicodeError:
+        return ''
+    labels = ascii_value.split('.')
+    if len(ascii_value) > 253 or any(
+        not re.fullmatch(
+            r'[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?',
+            label,
+        )
+        for label in labels
+    ):
+        return ''
+    return ascii_value
+
+
+def build_user_clash_rule(rule_type, pattern, action, extra=''):
+    """Validate form fields and return (rule, error-code)."""
+    rule_type = str(rule_type or '').strip().upper()
+    pattern = str(pattern or '').strip()
+    action = str(action or '').strip().upper()
+    extra = str(extra or '').strip().lower()
+    if not pattern:
+        return '', 'user_rule_pattern_empty'
+    if rule_type not in USER_CLASH_RULE_TYPE_KEYS:
+        return '', 'user_rule_invalid_type'
+    if action not in USER_CLASH_RULE_ACTIONS:
+        return '', 'user_rule_invalid_action'
+    if (
+        len(pattern) > 512
+        or ',' in pattern
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in pattern)
+    ):
+        return '', 'user_rule_invalid_pattern'
+
+    if rule_type in ('DOMAIN', 'DOMAIN-SUFFIX'):
+        pattern = _normalize_user_domain_pattern(
+            pattern,
+            suffix=rule_type == 'DOMAIN-SUFFIX',
+        )
+        if not pattern:
+            return '', 'user_rule_invalid_pattern'
+    elif rule_type == 'DOMAIN-KEYWORD':
+        pattern = _normalize_user_domain_pattern(pattern, keyword=True)
+        if not pattern:
+            return '', 'user_rule_invalid_pattern'
+    elif rule_type in ('IP-CIDR', 'IP-CIDR6'):
+        try:
+            network = ipaddress.ip_network(pattern, strict=False)
+        except ValueError:
+            return '', 'user_rule_invalid_pattern'
+        expected_version = 4 if rule_type == 'IP-CIDR' else 6
+        if network.version != expected_version:
+            return '', 'user_rule_invalid_pattern'
+        pattern = str(network)
+    elif rule_type == 'PROCESS-NAME':
+        if not pattern or len(pattern) > 255:
+            return '', 'user_rule_invalid_pattern'
+
+    if extra not in ('', 'no-resolve'):
+        return '', 'user_rule_invalid_extra'
+    if extra and rule_type not in ('IP-CIDR', 'IP-CIDR6'):
+        return '', 'user_rule_invalid_extra'
+
+    rule = f'{rule_type},{pattern},{USER_CLASH_RULE_ACTIONS[action]}'
+    if extra:
+        rule += f',{extra}'
+    if not validate_clash_rule(rule):
+        return '', 'user_rule_invalid_pattern'
+    return rule, ''
+
+
+def _strict_user_clash_rules(cfg):
+    raw = cfg.get(profile_defs.USER_CLASH_RULES_KEY, [])
+    if not isinstance(raw, list) or any(
+        not isinstance(rule, str) or not validate_clash_rule(rule)
+        for rule in raw
+    ):
+        raise UserRuleStateError('stored personal Clash rules are invalid')
+    return list(raw)
+
+
+def add_user_clash_rule(username, rule, expected_revision):
+    username = str(username or '').strip()
+    if not username:
+        return 'missing'
+    with usage_lock():
+        users = load_json(USERS_FILE, {})
+        cfg = users.get(username)
+        if not isinstance(cfg, dict):
+            return 'missing'
+        if not revision_matches(cfg, expected_revision):
+            raise UserRuleConflictError('user config revision changed')
+        rules = _strict_user_clash_rules(cfg)
+        if rule in rules:
+            return 'exists'
+        if len(rules) >= USER_CLASH_RULE_MAX_COUNT:
+            return 'limit'
+        cfg[profile_defs.USER_CLASH_RULES_KEY] = [rule, *rules]
+        users[username] = cfg
+        save_json(USERS_FILE, users)
+    return 'added'
+
+
+def delete_user_clash_rule(
+    username,
+    index,
+    expected_rule,
+    expected_revision,
+):
+    username = str(username or '').strip()
+    if not username:
+        return False
+    with usage_lock():
+        users = load_json(USERS_FILE, {})
+        cfg = users.get(username)
+        if not isinstance(cfg, dict):
+            return False
+        if not revision_matches(cfg, expected_revision):
+            raise UserRuleConflictError('user config revision changed')
+        rules = _strict_user_clash_rules(cfg)
+        if index < 0 or index >= len(rules):
+            return False
+        if not hmac.compare_digest(
+            rules[index].encode('utf-8'),
+            str(expected_rule or '').encode('utf-8'),
+        ):
+            raise UserRuleConflictError('personal rule changed at requested index')
+        rules.pop(index)
+        if rules:
+            cfg[profile_defs.USER_CLASH_RULES_KEY] = rules
+        else:
+            cfg.pop(profile_defs.USER_CLASH_RULES_KEY, None)
+        users[username] = cfg
+        save_json(USERS_FILE, users)
+    return True
+
+
 def apply_rule_pack_to_user(username, pack_key):
     username = str(username or '').strip()
     if not username:
@@ -4759,9 +5365,9 @@ def _parse_clash_rule(rule_str):
 _RULE_TYPE_LABELS = {
     'DOMAIN-SUFFIX': '域名后缀', 'DOMAIN-KEYWORD': '域名关键词', 'DOMAIN': '完整域名',
     'IP-CIDR': 'IP 段', 'IP-CIDR6': 'IPv6 段', 'GEOIP': 'GeoIP',
-    'RULE-SET': '规则集', 'MATCH': '兜底',
+    'PROCESS-NAME': '进程名称', 'RULE-SET': '规则集', 'MATCH': '兜底',
 }
-_ACTION_LABELS = {'DIRECT': '直连', 'REJECT': '拦截'}
+_ACTION_LABELS = {'DIRECT': '直连', 'REJECT': '拦截', NODE_GROUP: '代理'}
 
 
 _RULES_FLASH = {
@@ -4873,7 +5479,7 @@ def render_rules(
     <div class="grid grid-3">
       <div><label for="rule-pack">规则包</label><select id="rule-pack" name="pack">{pack_options}</select></div>
       <div><label for="rule-pack-scope">应用范围</label><select id="rule-pack-scope" name="scope">
-        <option value="global">全局模板</option>
+        <option value="global">通用模板</option>
         <option value="user">单个用户</option>
       </select></div>
       <div><label for="rule-pack-user">用户（选择“单个用户”时生效）</label><select id="rule-pack-user" name="user" disabled>
@@ -4882,7 +5488,7 @@ def render_rules(
     </div>
     <button class="btn secondary mt-md" type="submit">应用规则包</button>
   </form>
-  <div class="small mt-sm faint">全局模板影响所有用户；单个用户会写入 users.json 的个人 Clash 覆盖项。</div>
+  <div class="small mt-sm faint">通用模板会立即进入自动跟随用户；固定版本用户可在自己的面板中稍后合并。单个用户规则仍作为独立 Clash 覆盖项保存。</div>
 </div>
 <div class="card scroll-x" tabindex="0" aria-label="路由规则，可横向滚动" style="padding:0;overflow:hidden;">
   <table class="table"><thead><tr><th style="padding-left:18px;width:50px;">#</th><th>类型</th><th>匹配</th><th>动作</th><th style="padding-right:18px;width:90px;">操作</th></tr></thead>
@@ -4921,9 +5527,9 @@ def render_rules(
   <details>
     <summary>直接编辑全部规则</summary>
     <form method="post" action="/admin/rules/raw" class="inline-form mt-md"
-          data-confirm="保存会替换全部共享路由规则，并影响所有用户订阅，确认继续？">
+          data-confirm="保存会替换全部通用路由规则；自动跟随用户立即采用，固定版本用户可稍后合并，确认继续？">
       <input type="hidden" name="template_revision" value="{html.escape(submitted_revision, quote=True)}">
-      <div class="small mb-sm">每行一条规则，格式：<code>TYPE,匹配值,动作</code>。保存后同步到所有订阅模板。</div>
+      <div class="small mb-sm">每行一条规则，格式：<code>TYPE,匹配值,动作</code>。保存后更新通用模板；固定版本用户可稍后自行合并。</div>
       <label for="rules-raw" class="sr-only">全部路由规则</label>
       <textarea id="rules-raw" name="rules_raw" class="code-area code-med">{rules_text}</textarea>
       <div class="row mt-md">
@@ -5440,10 +6046,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             profile = normalize_subscription_profile((q.get('profile') or ['default'])[0])
             generated_at = profile_defs.utc_now_iso()
-            template_mtime = subscription_template_mtime()
-            yml = build_yaml(
-                user, str(cfg.get('sub_token') or ''),
-                profile=profile, generated_at=generated_at)
+            try:
+                rendered = render_subscription_yaml(
+                    user,
+                    str(cfg.get('sub_token') or ''),
+                    profile=profile,
+                    generated_at=generated_at,
+                )
+            except profile_defs.PinnedTemplateUnavailable:
+                self.send_response_body(
+                    503,
+                    '固定模板版本暂不可用，请登录用户面板合并最新版通用模板。',
+                    'text/plain; charset=utf-8',
+                    send_payload,
+                )
+                return
+            yml = rendered.text
             tx, rx, used = scaled_usage_for_user(user)
             total = user_total_quota(cfg)
             filename = f'{user}.yaml' if profile == 'default' else f'{user}-{profile}.yaml'
@@ -5453,7 +6071,9 @@ class Handler(BaseHTTPRequestHandler):
                     'Content-Disposition': f"attachment; filename*=UTF-8''{filename}",
                     'x-subscription-profile': profile,
                     'x-subscription-generated-at': generated_at,
-                    'x-subscription-template-mtime': template_mtime,
+                    'x-subscription-template-mtime': rendered.template_mtime,
+                    'x-subscription-template-mode': rendered.template_mode,
+                    'x-subscription-template-revision': rendered.template_revision,
                     'profile-update-interval': '24',
                     'subscription-userinfo': (
                         f'upload={tx}; download={rx}; total={total}; expire=0'
@@ -5913,6 +6533,188 @@ class Handler(BaseHTTPRequestHandler):
                 cookie=clear_user_session_cookie(secure=is_secure_request(self)),
                 status=303,
             )
+            return
+
+        if path == '/user/rules/add':
+            user, session_kind = get_logged_in_user_context(self)
+            if not user:
+                self.redirect('/user/login')
+                return
+            cfg = load_json(USERS_FILE, {}).get(user)
+            access_error = user_panel_access_error(
+                cfg, session_kind, today=local_now().date(),
+            )
+            if access_error == 'password_change_required':
+                self.redirect('/user/change-password')
+                return
+            if access_error in ('disabled', 'expired'):
+                self.redirect('/user/panel')
+                return
+            if access_error:
+                self.redirect('/user/login')
+                return
+            rule, error = build_user_clash_rule(
+                (form.get('rule_type') or [''])[0],
+                (form.get('pattern') or [''])[0],
+                (form.get('action') or [''])[0],
+                (form.get('extra') or [''])[0],
+            )
+            if error:
+                self.redirect(f'/user/panel?msg={error}')
+                return
+            expected_revision = (
+                form.get('user_revision') or ['']
+            )[0]
+            try:
+                result = add_user_clash_rule(
+                    user,
+                    rule,
+                    expected_revision,
+                )
+            except UserRuleConflictError:
+                self.redirect('/user/panel?msg=user_rule_conflict')
+                return
+            except UserRuleStateError:
+                self.send_response_body(
+                    503,
+                    '个人规则数据当前不可用，为避免覆盖已有内容，本次新增未执行。',
+                    'text/plain; charset=utf-8',
+                    True,
+                )
+                return
+            messages = {
+                'added': 'user_rule_added',
+                'exists': 'user_rule_exists',
+                'limit': 'user_rule_limit',
+            }
+            if result not in messages:
+                self.redirect('/user/login')
+                return
+            self.redirect(f'/user/panel?msg={messages[result]}')
+            return
+
+        if path == '/user/rules/delete':
+            user, session_kind = get_logged_in_user_context(self)
+            if not user:
+                self.redirect('/user/login')
+                return
+            cfg = load_json(USERS_FILE, {}).get(user)
+            access_error = user_panel_access_error(
+                cfg, session_kind, today=local_now().date(),
+            )
+            if access_error == 'password_change_required':
+                self.redirect('/user/change-password')
+                return
+            if access_error in ('disabled', 'expired'):
+                self.redirect('/user/panel')
+                return
+            if access_error:
+                self.redirect('/user/login')
+                return
+            try:
+                index = int((form.get('index') or [''])[0])
+            except (TypeError, ValueError):
+                self.redirect('/user/panel?msg=user_rule_invalid_index')
+                return
+            expected_rule = (form.get('expected_rule') or [''])[0]
+            expected_revision = (
+                form.get('user_revision') or ['']
+            )[0]
+            try:
+                deleted = delete_user_clash_rule(
+                    user,
+                    index,
+                    expected_rule,
+                    expected_revision,
+                )
+            except UserRuleConflictError:
+                self.redirect('/user/panel?msg=user_rule_conflict')
+                return
+            except UserRuleStateError:
+                self.send_response_body(
+                    503,
+                    '个人规则数据当前不可用，为避免覆盖已有内容，本次删除未执行。',
+                    'text/plain; charset=utf-8',
+                    True,
+                )
+                return
+            if not deleted:
+                self.redirect('/user/panel?msg=user_rule_invalid_index')
+                return
+            self.redirect('/user/panel?msg=user_rule_deleted')
+            return
+
+        if path == '/user/rule-pack/apply':
+            user, session_kind = get_logged_in_user_context(self)
+            if not user:
+                self.redirect('/user/login')
+                return
+            cfg = load_json(USERS_FILE, {}).get(user)
+            access_error = user_panel_access_error(
+                cfg, session_kind, today=local_now().date(),
+            )
+            if access_error == 'password_change_required':
+                self.redirect('/user/change-password')
+                return
+            if access_error in ('disabled', 'expired'):
+                self.redirect('/user/panel')
+                return
+            if access_error:
+                self.redirect('/user/login')
+                return
+            pack = (form.get('pack') or [''])[0]
+            if pack not in RULE_PACKS:
+                self.redirect('/user/panel?msg=invalid_rule_pack')
+                return
+            # The session is the sole authority for the mutation target. Any
+            # username submitted by a client is deliberately ignored.
+            if not apply_rule_pack_to_user(user, pack):
+                self.redirect('/user/panel?msg=invalid_rule_pack')
+                return
+            self.redirect('/user/panel?msg=rule_pack_applied')
+            return
+
+        if path == '/user/template-mode':
+            user, session_kind = get_logged_in_user_context(self)
+            if not user:
+                self.redirect('/user/login')
+                return
+            cfg = load_json(USERS_FILE, {}).get(user)
+            access_error = user_panel_access_error(
+                cfg, session_kind, today=local_now().date(),
+            )
+            if access_error == 'password_change_required':
+                self.redirect('/user/change-password')
+                return
+            if access_error in ('disabled', 'expired'):
+                self.redirect('/user/panel')
+                return
+            if access_error:
+                self.redirect('/user/login')
+                return
+            action = (form.get('action') or [''])[0]
+            messages = {
+                'follow': 'template_following',
+                'pin': 'template_pinned',
+                'merge': 'template_merged',
+            }
+            if action not in messages:
+                self.redirect('/user/panel?msg=invalid_template_action')
+                return
+            try:
+                changed = set_user_template_mode(user, action)
+            except TemplateConfigError:
+                self.send_response_body(
+                    503,
+                    '通用模板当前不可用，未修改你的模板选择。',
+                    'text/plain; charset=utf-8',
+                    True,
+                )
+                return
+            if not changed:
+                self.redirect('/user/login')
+                return
+            self.redirect(f'/user/panel?msg={messages[action]}')
             return
 
         if path.startswith('/panel/') and path.endswith('/rotate-token'):

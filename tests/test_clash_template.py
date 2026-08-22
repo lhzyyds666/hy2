@@ -4,10 +4,77 @@ import yaml
 
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "hysteria" / "clash-default.yaml.tpl"
+RULES_DOH = [
+    "https://1.1.1.1/dns-query#RULES",
+    "https://8.8.8.8/dns-query#RULES",
+]
 
 
 def load_template():
     return yaml.safe_load(TEMPLATE.read_text(encoding="utf-8"))
+
+
+def test_foreign_dns_queries_follow_proxy_rules():
+    cfg = load_template()
+    dns = cfg["dns"]
+    rules_doh = RULES_DOH
+
+    assert dns["respect-rules"] is True
+    assert dns["prefer-h3"] is False
+    assert dns["proxy-server-nameserver"] == [
+        "https://doh.pub/dns-query",
+        "https://dns.alidns.com/dns-query",
+    ]
+    assert dns["fallback"] == rules_doh
+
+    policy = dns["nameserver-policy"]
+    foreign_policies = {
+        domain: nameservers
+        for domain, nameservers in policy.items()
+        if nameservers == rules_doh
+    }
+    assert len(foreign_policies) == 53
+    assert sum(len(nameservers) for nameservers in foreign_policies.values()) == 106
+
+
+def test_domestic_and_steam_cdn_dns_stay_domestic():
+    policy = load_template()["dns"]["nameserver-policy"]
+    domestic_nameservers = ["223.5.5.5", "119.29.29.29"]
+
+    assert policy["+.cn"] == domestic_nameservers
+    assert policy["+.steamcontent.com"] == domestic_nameservers
+
+
+def test_template_contains_no_bare_foreign_doh_or_dot():
+    text = TEMPLATE.read_text(encoding="utf-8")
+
+    assert "https://1.1.1.1/dns-query\n" not in text
+    assert "https://8.8.8.8/dns-query\n" not in text
+    assert "tls://1.1.1.1" not in text
+    assert "tls://8.8.8.8" not in text
+
+
+def test_hysteria2_uses_fixed_udp_443_without_port_hopping():
+    cfg = load_template()
+    proxies = {proxy["name"]: proxy for proxy in cfg["proxies"]}
+    hysteria2 = proxies["🇺🇸 美国 UDP 443"]
+
+    assert hysteria2["type"] == "hysteria2"
+    assert hysteria2["port"] == 443
+    assert hysteria2["udp"] is True
+    assert hysteria2["up"] == "100 Mbps"
+    assert hysteria2["down"] == "400 Mbps"
+    assert "ports" not in hysteria2
+    assert "transport" not in hysteria2
+    assert "🇺🇸 美国 UDP (端口跳跃)" not in proxies
+
+    group_members = [
+        member
+        for group in cfg["proxy-groups"]
+        for member in group["proxies"]
+    ]
+    assert "🇺🇸 美国 UDP 443" in group_members
+    assert "🇺🇸 美国 UDP (端口跳跃)" not in group_members
 
 
 def test_github_uses_dedicated_url_test_group():
@@ -28,7 +95,7 @@ def test_gpt_uses_dedicated_url_test_group():
     assert gpt_group["type"] == "url-test"
     assert gpt_group["url"] == "https://chatgpt.com/cdn-cgi/trace"
     assert gpt_group["proxies"][:2] == [
-        "🇺🇸 美国 UDP (端口跳跃)",
+        "🇺🇸 美国 UDP 443",
         "🇺🇸 美国 UDP TUIC",
     ]
     assert "🇺🇸 美国 TCP (VLESS+REALITY)" in gpt_group["proxies"]
@@ -46,7 +113,7 @@ def test_google_uses_tcp_first_fallback_group():
     assert google_group["proxies"] == [
         "🇺🇸 美国 TCP (VLESS+REALITY)",
         "🇺🇸 美国 TCP 备用 (VLESS+REALITY)",
-        "🇺🇸 美国 UDP (端口跳跃)",
+        "🇺🇸 美国 UDP 443",
         "🇺🇸 美国 UDP TUIC",
     ]
     assert "🌐 Google 优化" in groups["🚀 节点选择"]["proxies"]
@@ -62,24 +129,27 @@ def test_academic_access_group_defaults_to_direct():
         "DIRECT",
         "🇺🇸 美国 TCP (VLESS+REALITY)",
         "🇺🇸 美国 TCP 备用 (VLESS+REALITY)",
-        "🇺🇸 美国 UDP (端口跳跃)",
+        "🇺🇸 美国 UDP 443",
         "🇺🇸 美国 UDP TUIC",
     ]
     assert "📚 学术访问" in groups["🚀 节点选择"]["proxies"]
 
 
-def test_telegram_uses_dedicated_url_test_group():
+def test_telegram_uses_manual_select_with_hysteria2_as_default():
     cfg = load_template()
     groups = {group["name"]: group for group in cfg["proxy-groups"]}
 
     telegram_group = groups["✈️ Telegram 优化"]
-    assert telegram_group["type"] == "url-test"
-    assert telegram_group["url"] == "https://telegram.org/img/website_icon.svg"
-    assert telegram_group["proxies"][:2] == [
-        "🇺🇸 美国 UDP (端口跳跃)",
-        "🇺🇸 美国 UDP TUIC",
-    ]
-    assert "🇺🇸 美国 TCP (VLESS+REALITY)" in telegram_group["proxies"]
+    assert telegram_group == {
+        "name": "✈️ Telegram 优化",
+        "type": "select",
+        "proxies": [
+            "🇺🇸 美国 UDP 443",
+            "🇺🇸 美国 UDP TUIC",
+            "🇺🇸 美国 TCP (VLESS+REALITY)",
+            "🇺🇸 美国 TCP 备用 (VLESS+REALITY)",
+        ],
+    }
     assert "✈️ Telegram 优化" in groups["🚀 节点选择"]["proxies"]
 
 
@@ -273,9 +343,16 @@ def test_telegram_rules_precede_general_rulesets():
 
     assert telegram_domain_indexes
     assert max(telegram_domain_indexes) < first_ruleset
-    assert "DOMAIN-SUFFIX,telegram.org,✈️ Telegram 优化" in rules
-    assert "DOMAIN-SUFFIX,t.me,✈️ Telegram 优化" in rules
-    assert "RULE-SET,telegramcidr,✈️ Telegram 优化,no-resolve" in rules
+    expected_telegram_rules = [
+        "DOMAIN-SUFFIX,telegram.org,✈️ Telegram 优化",
+        "DOMAIN-SUFFIX,telegram.me,✈️ Telegram 优化",
+        "DOMAIN-SUFFIX,telegram.dog,✈️ Telegram 优化",
+        "DOMAIN-SUFFIX,t.me,✈️ Telegram 优化",
+        "DOMAIN-SUFFIX,telegra.ph,✈️ Telegram 优化",
+        "DOMAIN-SUFFIX,tdesktop.com,✈️ Telegram 优化",
+        "RULE-SET,telegramcidr,✈️ Telegram 优化,no-resolve",
+    ]
+    assert all(rule in rules for rule in expected_telegram_rules)
     assert not any("telegram" in rule.lower() and rule.endswith(",DIRECT") for rule in rules)
 
 
@@ -284,10 +361,7 @@ def test_github_dns_uses_overseas_resolvers():
     policy = cfg["dns"]["nameserver-policy"]
 
     for domain in ("+.github.com", "+.githubusercontent.com", "+.ghcr.io"):
-        assert policy[domain] == [
-            "https://1.1.1.1/dns-query",
-            "https://8.8.8.8/dns-query",
-        ]
+        assert policy[domain] == RULES_DOH
 
 
 def test_gpt_dns_uses_overseas_resolvers():
@@ -295,10 +369,7 @@ def test_gpt_dns_uses_overseas_resolvers():
     policy = cfg["dns"]["nameserver-policy"]
 
     for domain in ("+.openai.com", "+.chatgpt.com", "+.oaistatic.com", "+.oaiusercontent.com"):
-        assert policy[domain] == [
-            "https://1.1.1.1/dns-query",
-            "https://8.8.8.8/dns-query",
-        ]
+        assert policy[domain] == RULES_DOH
 
 
 def test_google_dns_uses_overseas_resolvers():
@@ -317,10 +388,7 @@ def test_google_dns_uses_overseas_resolvers():
         "+.gvt2.com",
         "+.firebaseapp.com",
     ):
-        assert policy[domain] == [
-            "https://1.1.1.1/dns-query",
-            "https://8.8.8.8/dns-query",
-        ]
+        assert policy[domain] == RULES_DOH
 
 
 def test_telegram_dns_uses_overseas_resolvers():
@@ -328,10 +396,77 @@ def test_telegram_dns_uses_overseas_resolvers():
     policy = cfg["dns"]["nameserver-policy"]
 
     for domain in ("+.telegram.org", "+.telegram.me", "+.t.me", "+.telegra.ph"):
-        assert policy[domain] == [
-            "https://1.1.1.1/dns-query",
-            "https://8.8.8.8/dns-query",
-        ]
+        assert policy[domain] == RULES_DOH
+
+
+def test_domestic_dns_prefers_mainland_resolvers_and_preserves_local_names():
+    cfg = load_template()
+    dns = cfg["dns"]
+    mainland_resolvers = [
+        "223.5.5.5",
+        "119.29.29.29",
+        "https://doh.pub/dns-query",
+        "https://dns.alidns.com/dns-query",
+    ]
+
+    assert dns["cache-algorithm"] == "arc"
+    assert dns["nameserver"] == mainland_resolvers
+    assert dns["direct-nameserver"] == mainland_resolvers
+    assert dns["direct-nameserver-follow-policy"] is False
+    assert dns["nameserver-policy"]["+.cn"] == mainland_resolvers[:2]
+    for pattern in (
+        "*.lan",
+        "*.local",
+        "localhost",
+        "+.home.arpa",
+        "+.miwifi.com",
+        "+.tplinkwifi.net",
+        "+.tplogin.cn",
+        "+.router.asus.com",
+    ):
+        assert pattern in dns["fake-ip-filter"]
+
+
+def test_domestic_static_routes_precede_remote_rule_providers():
+    cfg = load_template()
+    rules = cfg["rules"]
+    cn_start = rules.index("DOMAIN-SUFFIX,cn,DIRECT")
+    reject_index = rules.index("RULE-SET,reject,REJECT")
+    direct_ruleset_index = rules.index("RULE-SET,direct,DIRECT")
+    proxy_ruleset_index = rules.index("RULE-SET,proxy,🚀 节点选择")
+    representative_rules = [
+        "DOMAIN-SUFFIX,qq.com,DIRECT",
+        "DOMAIN-SUFFIX,taobao.com,DIRECT",
+        "DOMAIN-SUFFIX,baidu.com,DIRECT",
+        "DOMAIN-SUFFIX,douyin.com,DIRECT",
+        "DOMAIN-SUFFIX,bilibili.com,DIRECT",
+        "DOMAIN-SUFFIX,jd.com,DIRECT",
+        "DOMAIN-SUFFIX,zhihu.com,DIRECT",
+        "DOMAIN-SUFFIX,unionpay.com,DIRECT",
+        "DOMAIN-SUFFIX,aliyuncdn.com,DIRECT",
+        "DOMAIN-SUFFIX,tencentcloudcdn.com,DIRECT",
+    ]
+
+    assert reject_index < cn_start < direct_ruleset_index < proxy_ruleset_index
+    assert rules.index("DOMAIN-SUFFIX,openai.com,🤖 GPT 优化") < cn_start
+    assert rules.index("DOMAIN-SUFFIX,google.com,🌐 Google 优化") < cn_start
+    assert all(rule in rules for rule in representative_rules)
+    assert all(rules.index(rule) < direct_ruleset_index for rule in representative_rules)
+    assert sum(
+        rule.startswith("DOMAIN-SUFFIX,") and rule.endswith(",DIRECT")
+        for rule in rules[cn_start:direct_ruleset_index]
+    ) >= 300
+    assert "DST-PORT,8080,DIRECT" not in rules
+
+
+def test_connection_state_is_reused_for_stability():
+    cfg = load_template()
+
+    assert cfg["tcp-concurrent"] is True
+    assert cfg["profile"] == {
+        "store-selected": True,
+        "store-fake-ip": True,
+    }
 
 
 def test_tcp_vless_nodes_do_not_tunnel_udp():

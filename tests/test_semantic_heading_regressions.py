@@ -343,12 +343,14 @@ def test_user_panel_sections_follow_its_h1_without_div_titles(
         },
         session_auth=True,
     )
-    audit = _assert_valid_outline(page, [1, 2, 2, 2, 2, 2])
+    audit = _assert_valid_outline(page, [1, 2, 2, 2, 2, 2, 2, 2])
 
     assert [heading["text"] for heading in audit.headings] == [
         "用户面板",
         "流量进度",
         "快速导入",
+        "通用模板与我的规则",
+        "我的规则",
         "近 30 天用量趋势",
         "订阅链接",
         "登录面板地址",
